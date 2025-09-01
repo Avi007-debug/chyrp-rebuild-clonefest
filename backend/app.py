@@ -1,5 +1,3 @@
-# app.py
-
 from flask import Flask, jsonify
 from flask_cors import CORS
 import psycopg2
@@ -48,6 +46,35 @@ def test_db():
     finally:
         if conn is not None:
             conn.close()
+
+# New endpoint for blog posts
+@app.route('/posts')
+def get_posts():
+    # In a real application, you would fetch this data from your PostgreSQL database.
+    # For now, we will use hardcoded data to test the frontend.
+    sample_posts = [
+        {
+            "type": "text",
+            "title": "Welcome to Chyrp Lite",
+            "content": "This is the first post on your new Chyrp Lite blog. It's a text post, simple and clean. You can edit or delete this post and start creating your own content!"
+        },
+        {
+            "type": "photo",
+            "title": "A Beautiful Sunset",
+            "image_url": "https://images.unsplash.com/photo-1502685104226-ee32379fefbe?q=80&w=1974&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
+        },
+        {
+            "type": "quote",
+            "quote_text": "The future belongs to those who believe in the beauty of their dreams.",
+            "quote_author": "Eleanor Roosevelt"
+        },
+        {
+            "type": "link",
+            "title": "Vite - Next Generation Frontend Tooling",
+            "url": "https://vitejs.dev/"
+        }
+    ]
+    return jsonify(sample_posts)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

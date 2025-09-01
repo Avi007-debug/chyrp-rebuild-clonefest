@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "title": "Welcome to Chyrp Rebuild",
+    "content": "This is your first test post. If you see this, your setup is working!"
+  },
+  {
+    "id": 2,
+    "title": "Another Post",
+    "content": "Posts are being loaded successfully from posts.json."
+  }
+]
