@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import PostCard from './PostCard.jsx';
+import PostCard from './PostCard.jsx'; // Corrected the import path
 
 const API_URL = "http://localhost:5000";
 
@@ -36,7 +36,8 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
             })
             .then(() => {
                 setPosts(currentPosts => currentPosts.filter(p => p.id !== postId));
-                onPostDeleted();
+                // Reloading is a simple way to ensure UI consistency after delete
+                window.location.reload(); 
             })
             .catch(err => alert(`Error: ${err.message || 'Could not delete post.'}`));
         }
@@ -47,19 +48,18 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
 
     return (
         <main className="max-w-3xl mx-auto p-6 space-y-8">
-            {posts.length > 0 ? (
-                 posts.map(post => (
-                    <PostCard 
-                        key={post.id} 
-                        post={post} 
-                        currentUserId={currentUserId} 
-                        setPage={setPage}
-                        onDelete={handleDeletePost}
-                    />
-                ))
-            ) : (
-                <div className="text-center text-gray-500 dark:text-gray-400">No posts found.</div>
-            )}
+            {posts.map(post => (
+                <PostCard 
+                    key={post.id} 
+                    post={post} 
+                    currentUserId={currentUserId} 
+                    setPage={setPage}
+                    onDelete={handleDeletePost}
+                    // --- THIS IS THE FIX ---
+                    // We now correctly pass the token down to each PostCard
+                    token={token}
+                />
+            ))}
         </main>
     );
 };

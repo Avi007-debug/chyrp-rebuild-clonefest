@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react'; // The missing useState was added here
 import ReactMarkdown from 'react-markdown';
-import { LinkIcon, UserIcon, EditIcon, TrashIcon } from './Icons.jsx';
+import { LinkIcon, UserIcon, EditIcon, TrashIcon, MessageCircleIcon } from './Icons.jsx';
+import CommentSection from './CommentSection.jsx';
 
-const PostCard = ({ post, currentUserId, setPage, onDelete }) => {
+const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => { // Added token to props
     const isAuthor = post.user_id === currentUserId;
+    const [showComments, setShowComments] = useState(false); 
 
     const renderPostContent = () => {
         switch (post.type) {
@@ -51,17 +53,29 @@ const PostCard = ({ post, currentUserId, setPage, onDelete }) => {
                     <UserIcon className="h-5 w-5 text-gray-400"/>
                     <span className="ml-2">Posted by <span className="font-medium text-gray-700 dark:text-gray-300">{post.username}</span></span>
                 </div>
-                {isAuthor && (
-                    <div className="flex items-center space-x-2">
-                        <button onClick={() => setPage({ name: 'edit-post', postId: post.id })} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-blue-600 transition-colors">
-                            <EditIcon />
-                        </button>
-                        <button onClick={() => onDelete(post.id)} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-red-600 transition-colors">
-                            <TrashIcon />
-                        </button>
-                    </div>
-                )}
+                
+                <div className="flex items-center space-x-2">
+                    {/* The comment button should be visible to everyone */}
+                    <button onClick={() => setShowComments(!showComments)} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-green-600 transition-colors">
+                        <MessageCircleIcon />
+                    </button>
+
+                    {/* Edit and Delete buttons are only for the author */}
+                    {isAuthor && (
+                        <>
+                            <button onClick={() => setPage({ name: 'edit-post', postId: post.id })} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-blue-600 transition-colors">
+                                <EditIcon />
+                            </button>
+                            <button onClick={() => onDelete(post.id)} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-red-600 transition-colors">
+                                <TrashIcon />
+                            </button>
+                        </>
+                    )}
+                </div>
             </div>
+            
+            {/* Pass the token down to the CommentSection */}
+            {showComments && <CommentSection postId={post.id} token={token} currentUserId={currentUserId} />}
         </article>
     );
 };
