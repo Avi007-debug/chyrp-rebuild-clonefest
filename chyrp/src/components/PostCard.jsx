@@ -50,12 +50,42 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
         <article className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-all duration-300 hover:shadow-xl border border-transparent hover:border-pink-500/30">
             {renderPostContent()}
 
+            {/* Tags section with oval and bold design */}
+            {post.tags && post.tags.length > 0 && (
+                <div className="px-6 py-2">
+                    <div className="flex flex-wrap gap-2">
+                        {post.tags.map((tag) => (
+                            <span
+                                key={tag}
+                                className="inline-flex items-center px-4 py-1 rounded-full bg-pink-100 dark:bg-pink-900/30 border border-pink-300 text-pink-700 dark:text-pink-200 text-sm font-bold shadow-md hover:bg-pink-200 transition-colors duration-150 cursor-pointer"
+                                style={{ boxShadow: '0 2px 8px rgba(60,64,67,.10)' }}
+                            >
+                                <span className="mr-1 text-pink-500 font-bold">#</span><span className="font-bold">{tag}</span>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/*
+                How to add tags to a post:
+                - When creating or editing a post, include a 'tags' field (array of strings) in the post data sent to the backend.
+                - Example: { title: '...', content: '...', tags: ['react', 'flask', 'web'] }
+                - The backend will save and return these tags for each post.
+            */}
+
             <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-                    <UserIcon className="h-5 w-5 text-gray-400"/>
-                    <span className="ml-2">
-                        Posted by <span className="font-medium text-gray-700 dark:text-gray-300">{post.username}</span>
-                    </span>
+                <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 gap-4">
+                    <div className="flex items-center">
+                        <UserIcon className="h-5 w-5 text-gray-400"/>
+                        <span className="ml-2">
+                            Posted by <span className="font-medium text-gray-700 dark:text-gray-300">{post.username}</span>
+                        </span>
+                    </div>
+                    {/* Post views */}
+                    {typeof post.view_count === 'number' && (
+                        <span className="ml-4 text-xs text-gray-400">{post.view_count} views</span>
+                    )}
                 </div>
 
                 <div className="flex items-center space-x-2">
