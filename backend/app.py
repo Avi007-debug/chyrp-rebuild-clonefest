@@ -149,16 +149,14 @@ def get_posts():
 @app.route('/posts/<int:post_id>', methods=['GET'])
 def get_post(post_id):
     """Fetches a single post by its ID and increments the view count."""
-    print(f"=== DEBUG: get_post called for post_id: {post_id} ===")
-    
     user_id = None
     try:
         # Check for a token, but don't require one
         verify_jwt_in_request(optional=True)
         user_id = get_jwt_identity()
-        print(f"DEBUG: User ID from token: {user_id} (type: {type(user_id)})")
-    except Exception as e:
-        print(f"DEBUG: No valid token or error: {e}")
+        # Convert to int if not None for consistency
+        user_id = int(user_id) if user_id else None
+    except Exception:
         user_id = None
 
     conn = None
@@ -166,53 +164,45 @@ def get_post(post_id):
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # First, get the post and its author
-        cur.execute("SELECT p.*, u.username FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = %s", (post_id,))
+        # Get the post and its author with like count in a single query
+        cur.execute("""
+            SELECT 
+                p.*, 
+                u.username,
+                COALESCE(lc.like_count, 0) AS like_count,
+                CASE WHEN %s IS NOT NULL THEN 
+                    EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) 
+                ELSE false END AS liked_by_user
+            FROM posts p 
+            JOIN users u ON p.user_id = u.id
+            LEFT JOIN (
+                SELECT post_id, COUNT(*) as like_count
+                FROM post_likes
+                GROUP BY post_id
+            ) lc ON p.id = lc.post_id
+            WHERE p.id = %s
+        """, (user_id, user_id, post_id))
+        
         post = cur.fetchone()
 
         if not post:
-            print("DEBUG: Post not found!")
             return jsonify({"message": "Post not found"}), 404
-
-        print(f"DEBUG: Found post - ID: {post['id']}, Title: '{post['title']}'")
-        print(f"DEBUG: Post author user_id: {post['user_id']} (type: {type(post['user_id'])})")
-        print(f"DEBUG: Current user_id: {user_id} (type: {type(user_id)})")
 
         # --- View Count Logic ---
         increment_view = False
-        
-        # Check 1: Is user logged in?
-        if not user_id:
-            print("DEBUG: User not logged in - no view count increment")
-        else:
-            # Check 2: Is user the author?
-            if post['user_id'] == int(user_id):
-                print("DEBUG: User is the author - no view count increment")
-            else:
-                print("DEBUG: User is logged in and NOT the author - checking if already viewed")
-                
-                # Check 3: Has user already viewed this post?
-                cur.execute("SELECT 1 FROM post_views WHERE post_id = %s AND user_id = %s", (post_id, int(user_id)))
-                existing_view = cur.fetchone()
-                
-                if existing_view:
-                    print(f"DEBUG: User has already viewed this post on {existing_view.get('viewed_at', 'unknown time')}")
-                else:
-                    print("DEBUG: User has NOT viewed this post yet - will increment count")
-                    increment_view = True
-
-        print(f"DEBUG: Final decision - increment view: {increment_view}")
+        if user_id and post['user_id'] != user_id:
+            cur.execute("SELECT 1 FROM post_views WHERE post_id = %s AND user_id = %s", (post_id, user_id))
+            existing_view = cur.fetchone()
+            if not existing_view:
+                increment_view = True
 
         if increment_view:
-            print("DEBUG: Executing view count increment...")
-            # Update the post view count
             cur.execute("UPDATE posts SET view_count = view_count + 1 WHERE id = %s", (post_id,))
-            # Record this view in post_views table
-            cur.execute("INSERT INTO post_views (post_id, user_id) VALUES (%s, %s)", (post_id, int(user_id)))
+            cur.execute("INSERT INTO post_views (post_id, user_id) VALUES (%s, %s)", (post_id, user_id))
             conn.commit()
-            # Manually update the view count in the response object
+            # Update the post data to reflect the new view count
+            post = dict(post)  # Convert to dict for modification
             post['view_count'] += 1
-            print("DEBUG: View count incremented and recorded successfully!")
 
         # Get all tags for the post
         cur.execute("""
@@ -222,24 +212,18 @@ def get_post(post_id):
         """, (post_id,))
         tags = [row['name'] for row in cur.fetchall()]
 
-        # Prepare the final data object to send to the frontend
+        # Prepare the final response
         post_data = dict(post)
         post_data['tags'] = tags
-        
-        cur.close()
-        print(f"DEBUG: Returning post data with view_count: {post_data.get('view_count')}")
+
         return jsonify(post_data)
 
     except (Exception, psycopg2.DatabaseError) as error:
-        print(f"ERROR in get_post: {error}")
-        import traceback
-        traceback.print_exc()
+        print(f"ERROR in get_post: {error}")  # Keep some logging for debugging
         return jsonify({"message": "Database error"}), 500
     finally:
-        if conn: 
+        if conn:
             conn.close()
-        print("=== DEBUG: get_post execution completed ===\n")
-
 @app.route('/posts', methods=['POST'])
 @jwt_required()
 def create_post():
