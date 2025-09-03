@@ -99,45 +99,150 @@ def login():
 
 @app.route('/posts', methods=['GET'])
 def get_posts():
-    # ... (This function is now more complex to include tags) ...
+    """
+    Fetches all posts.
+    UPDATED: Now includes like count, user like status, and an array of tags.
+    """
     user_id = None
     try:
         verify_jwt_in_request(optional=True)
         user_id = get_jwt_identity()
-    except:
+    except Exception:
         user_id = None
-        
+    
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
         sql_query = """
             SELECT 
-                p.*, u.username,
+                p.*, 
+                u.username,
                 COALESCE(lc.like_count, 0) AS like_count,
                 EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) AS liked_by_user,
                 ARRAY_AGG(t.name) FILTER (WHERE t.name IS NOT NULL) as tags
             FROM posts p
             JOIN users u ON p.user_id = u.id
-            LEFT JOIN (SELECT post_id, COUNT(*) as like_count FROM post_likes GROUP BY post_id) lc ON p.id = lc.post_id
+            LEFT JOIN (
+                SELECT post_id, COUNT(*) as like_count
+                FROM post_likes
+                GROUP BY post_id
+            ) lc ON p.id = lc.post_id
             LEFT JOIN post_tags pt ON p.id = pt.post_id
             LEFT JOIN tags t ON pt.tag_id = t.id
             GROUP BY p.id, u.username, lc.like_count
             ORDER BY p.created_at DESC;
         """
+        
         cur.execute(sql_query, (user_id,))
         posts = [dict(post) for post in cur.fetchall()]
+        cur.close()
         return jsonify(posts)
-    except Exception as e:
-        print(f"DB Error: {e}")
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"DATABASE ERROR fetching posts: {error}")
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
     finally:
         if conn: conn.close()
 
+# --- Single Post Detail Endpoint (with View Count Logic) ---
+@app.route('/posts/<int:post_id>', methods=['GET'])
+def get_post(post_id):
+    """Fetches a single post by its ID and increments the view count."""
+    print(f"=== DEBUG: get_post called for post_id: {post_id} ===")
+    
+    user_id = None
+    try:
+        # Check for a token, but don't require one
+        verify_jwt_in_request(optional=True)
+        user_id = get_jwt_identity()
+        print(f"DEBUG: User ID from token: {user_id} (type: {type(user_id)})")
+    except Exception as e:
+        print(f"DEBUG: No valid token or error: {e}")
+        user_id = None
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # First, get the post and its author
+        cur.execute("SELECT p.*, u.username FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = %s", (post_id,))
+        post = cur.fetchone()
+
+        if not post:
+            print("DEBUG: Post not found!")
+            return jsonify({"message": "Post not found"}), 404
+
+        print(f"DEBUG: Found post - ID: {post['id']}, Title: '{post['title']}'")
+        print(f"DEBUG: Post author user_id: {post['user_id']} (type: {type(post['user_id'])})")
+        print(f"DEBUG: Current user_id: {user_id} (type: {type(user_id)})")
+
+        # --- View Count Logic ---
+        increment_view = False
+        
+        # Check 1: Is user logged in?
+        if not user_id:
+            print("DEBUG: User not logged in - no view count increment")
+        else:
+            # Check 2: Is user the author?
+            if post['user_id'] == int(user_id):
+                print("DEBUG: User is the author - no view count increment")
+            else:
+                print("DEBUG: User is logged in and NOT the author - checking if already viewed")
+                
+                # Check 3: Has user already viewed this post?
+                cur.execute("SELECT 1 FROM post_views WHERE post_id = %s AND user_id = %s", (post_id, int(user_id)))
+                existing_view = cur.fetchone()
+                
+                if existing_view:
+                    print(f"DEBUG: User has already viewed this post on {existing_view.get('viewed_at', 'unknown time')}")
+                else:
+                    print("DEBUG: User has NOT viewed this post yet - will increment count")
+                    increment_view = True
+
+        print(f"DEBUG: Final decision - increment view: {increment_view}")
+
+        if increment_view:
+            print("DEBUG: Executing view count increment...")
+            # Update the post view count
+            cur.execute("UPDATE posts SET view_count = view_count + 1 WHERE id = %s", (post_id,))
+            # Record this view in post_views table
+            cur.execute("INSERT INTO post_views (post_id, user_id) VALUES (%s, %s)", (post_id, int(user_id)))
+            conn.commit()
+            # Manually update the view count in the response object
+            post['view_count'] += 1
+            print("DEBUG: View count incremented and recorded successfully!")
+
+        # Get all tags for the post
+        cur.execute("""
+            SELECT t.name FROM tags t
+            JOIN post_tags pt ON t.id = pt.tag_id
+            WHERE pt.post_id = %s
+        """, (post_id,))
+        tags = [row['name'] for row in cur.fetchall()]
+
+        # Prepare the final data object to send to the frontend
+        post_data = dict(post)
+        post_data['tags'] = tags
+        
+        cur.close()
+        print(f"DEBUG: Returning post data with view_count: {post_data.get('view_count')}")
+        return jsonify(post_data)
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"ERROR in get_post: {error}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"message": "Database error"}), 500
+    finally:
+        if conn: 
+            conn.close()
+        print("=== DEBUG: get_post execution completed ===\n")
+
 @app.route('/posts', methods=['POST'])
 @jwt_required()
 def create_post():
-    # ... (This function is updated to handle tags) ...
     user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data.get('title'): return jsonify({"message": "Title is required"}), 400
@@ -159,9 +264,10 @@ def create_post():
         manage_tags(cur, post_id, tags_string)
 
         conn.commit()
+        cur.close()
         return jsonify({"message": "Post created successfully", "post_id": post_id}), 201
-    except Exception as e:
-        print(f"DB Error: {e}")
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"DATABASE ERROR creating post: {error}")
         return jsonify({"message": "Database error"}), 500
     finally:
         if conn: conn.close()
@@ -169,7 +275,6 @@ def create_post():
 @app.route('/posts/<int:post_id>', methods=['PUT'])
 @jwt_required()
 def update_post(post_id):
-    # ... (This function is updated to handle tags) ...
     current_user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data.get('title'): return jsonify({"message": "Title is required"}), 400
@@ -194,9 +299,10 @@ def update_post(post_id):
         manage_tags(cur, post_id, tags_string)
         
         conn.commit()
+        cur.close()
         return jsonify({"message": "Post updated successfully"})
-    except Exception as e:
-        print(f"DB Error: {e}")
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"DATABASE ERROR updating post: {error}")
         return jsonify({"message": "Database error"}), 500
     finally:
         if conn: conn.close()
@@ -334,44 +440,27 @@ def get_posts_by_tag(tag_name):
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
     finally:
         if conn: conn.close()
-@app.route('/posts/<int:post_id>', methods=['GET'])
-def get_post(post_id):
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Increment view count and fetch updated post
-        cur.execute(
-            "UPDATE posts SET view_count = view_count + 1 WHERE id = %s RETURNING *",
-            (post_id,)
-        )
-        post = cur.fetchone()
-        if not post:
-            return jsonify({"message": "Post not found"}), 404
+# --- Helper Function for Tag Management ---
+def manage_tags(cur, post_id, tags_string):
+    """Handles finding/creating tags and linking them to a post."""
+    if tags_string:
+        tag_names = [tag.strip().lower() for tag in tags_string.split(',') if tag.strip()]
+        tag_ids = []
+        for name in tag_names:
+            cur.execute("SELECT id FROM tags WHERE name = %s", (name,))
+            tag = cur.fetchone()
+            if tag:
+                tag_ids.append(tag[0])
+            else:
+                cur.execute("INSERT INTO tags (name) VALUES (%s) RETURNING id", (name,))
+                tag_ids.append(cur.fetchone()[0])
+        
+        # Link tags to the post
+        for tag_id in tag_ids:
+            cur.execute("INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (post_id, tag_id))
 
-        # Get tags
-        cur.execute("""
-            SELECT t.name FROM tags t
-            JOIN post_tags pt ON t.id = pt.tag_id
-            WHERE pt.post_id = %s
-        """, (post_id,))
-        tags = [row['name'] for row in cur.fetchall()]
 
-        conn.commit()
-
-        # Convert DictRow -> dict and attach tags
-        post_data = dict(post)
-        post_data["tags"] = tags
-
-        return jsonify(post_data)
-
-    except Exception as e:
-        print(f"DB Error: {e}")   # check Flask logs!
-        return jsonify({"message": "Database error"}), 500
-    finally:
-        if conn:
-            conn.close()
 
 # --- Main Execution ---
 if __name__ == '__main__':

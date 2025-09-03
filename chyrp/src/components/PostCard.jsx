@@ -113,6 +113,13 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                             </button>
                         </>
                     )}
+                    {/* View Post button */}
+                    <button
+                        onClick={() => setPage({ name: 'post-detail', postId: post.id })}
+                        className="p-2 rounded-md text-pink-600 bg-pink-100 hover:bg-pink-200 font-bold transition-colors"
+                    >
+                        View Post
+                    </button>
                 </div>
             </div>
 

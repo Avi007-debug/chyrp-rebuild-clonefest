@@ -6,6 +6,7 @@ import LoginPage from './components/LoginPage.jsx';
 import RegisterPage from './components/RegisterPage.jsx';
 import CreatePostPage from './components/CreatePostPage.jsx';
 import EditPostPage from './components/EditPostPage.jsx';
+import PostDetailPage from './components/PostDetailPage.jsx';
 import ProfileDropdown from './components/ProfileDropdown.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { PlusCircleIcon } from './components/Icons.jsx';
@@ -72,6 +73,8 @@ export default function App() {
       case 'edit-post':
         if (!token) return <LoginPage onLoginSuccess={handleLoginSuccess} setPage={setPage} />;
         return <EditPostPage token={token} setPage={setPage} postId={page.postId} />;
+      case 'post-detail':
+        return <PostDetailPage postId={page.postId} setPage={setPage} token={token} currentUserId={currentUserId} />;
       default:
         return <HomePage 
                     setPage={setPage} 
