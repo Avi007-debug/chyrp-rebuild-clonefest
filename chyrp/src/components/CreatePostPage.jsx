@@ -3,168 +3,272 @@ import React, { useState, useEffect } from 'react';
 const API_URL = "http://localhost:5000";
 
 const CreatePostPage = ({ token, setPage }) => {
-    const [postType, setPostType] = useState('text');
-    const [title, setTitle] = useState('');
-    const [content, setContent] = useState(''); // For text posts
-    const [mediaFiles, setMediaFiles] = useState([]); // For multiple media uploads
-    const [tags, setTags] = useState('');
-    const [categoryId, setCategoryId] = useState('');
-    const [categories, setCategories] = useState([]);
-    const [error, setError] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
+  const [postType, setPostType] = useState('text');
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [mediaFiles, setMediaFiles] = useState([]);
+  const [tags, setTags] = useState('');
+  const [attribution, setAttribution] = useState('');
+  const [licenseText, setLicenseText] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [categories, setCategories] = useState([]);
 
-    // Fetch categories on component mount
-    useEffect(() => {
-        fetch(`${API_URL}/categories`)
-            .then(res => res.json())
-            .then(data => {
-                setCategories(data);
-                // Set a default category if available
-                if (data.length > 0) {
-                    const defaultCategory = data.find(c => c.slug === 'uncategorized') || data[0];
-                    setCategoryId(defaultCategory.id);
-                }
-            })
-            .catch(() => setError("Could not load categories."));
-    }, []);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaQuestion, setCaptchaQuestion] = useState('');
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
 
-    const handleFileChange = (e) => {
-        setMediaFiles(Array.from(e.target.files));
-    };
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!title.trim() || !categoryId) {
-            setError('Title and Category are required.');
-            return;
+  // 🔹 Load categories + captcha on mount
+  useEffect(() => {
+    // categories
+    fetch(`${API_URL}/categories`)
+      .then(res => res.json())
+      .then(data => {
+        setCategories(data);
+        if (data.length > 0) {
+          const defaultCategory = data.find(c => c.slug === 'uncategorized') || data[0];
+          setCategoryId(defaultCategory.id);
         }
-        setIsSubmitting(true);
-        setError('');
+      })
+      .catch(() => setError("Could not load categories."));
 
-        let mediaUrls = [];
+    // captcha
+    loadCaptcha();
+  }, []);
 
-        // Step 1: Upload file if it's a media post
-        if (['photo', 'video', 'audio'].includes(postType) && mediaFiles.length > 0) {
-            const uploadPromises = mediaFiles.map(file => {
-                const formData = new FormData();
-                formData.append('file', file);
-                return fetch(`${API_URL}/upload`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` },
-                    body: formData,
-                }).then(res => {
-                    if (!res.ok) throw new Error(`File upload failed for ${file.name}.`);
-                    return res.json();
-                });
-            });
+  const loadCaptcha = () => {
+    fetch(`${API_URL}/captcha/new`)
+      .then(res => res.json())
+      .then(data => {
+        setCaptchaToken(data.captcha_token);
+        setCaptchaQuestion(data.question);
+        setCaptchaAnswer('');
+      })
+      .catch(() => setError("Failed to load captcha"));
+  };
 
-            try {
-                const uploadResults = await Promise.all(uploadPromises);
-                mediaUrls = uploadResults.map(result => result.file_url);
-            } catch (err) {
-                setError(err.message);
-                setIsSubmitting(false);
-                return;
-            }
-        }
+  const handleFileChange = (e) => {
+    setMediaFiles(Array.from(e.target.files));
+  };
 
-        // Step 2: Create the post with text content or the new media URL
-        const postData = {
-            type: postType,
-            title: title.trim(),
-            content: postType === 'text' ? content.trim() : null,
-            media_urls: mediaUrls,
-            tags: tags.trim(),
-            category_id: categoryId,
-        };
+  const handlePostTypeChange = (newType) => {
+    setPostType(newType);
+    setContent('');
+    setMediaFiles([]);
+  };
 
-        try {
-            const postRes = await fetch(`${API_URL}/posts`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify(postData),
-            });
-            if (!postRes.ok) throw new Error('Failed to create post.');
-            
-            // Success
-            setPage({ name: 'home' });
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
+  // 🔹 Unified submit
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
 
-    const renderContentInput = () => {
-        switch (postType) {
-            case 'photo':
-            case 'video':
-            case 'audio':
-                return (
-                    <div>
-                        <label className="block font-semibold mb-2" htmlFor="media-file">Upload File</label>
-                        <input id="media-file" type="file" multiple onChange={handleFileChange} required className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100"/>
-                    </div>
-                );
-            case 'text':
-            default:
-                return (
-                     <div>
-                        <label className="block font-semibold mb-2" htmlFor="post-content">Content (Markdown supported)</label>
-                        <textarea id="post-content" value={content} onChange={e => setContent(e.target.value)} rows="10" className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600 font-mono"></textarea>
-                    </div>
-                );
-        }
-    };
+    if (!title.trim() || !categoryId) {
+      setError('Title and Category are required.');
+      return;
+    }
+    if (!captchaAnswer.trim()) {
+      setError('Please solve the captcha.');
+      return;
+    }
 
-    const postTypes = ['text', 'photo', 'video', 'audio'];
+    setIsSubmitting(true);
 
-    return (
-        <div className="max-w-3xl mx-auto mt-10 p-4">
-            <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 shadow-xl rounded-lg p-8 space-y-6">
-                <h2 className="text-3xl font-bold text-center">Create a New Post</h2>
-                {error && <p className="bg-red-100 text-red-700 p-3 rounded text-center text-sm">{error}</p>}
-                
-                <div className="flex justify-center space-x-2 p-1 bg-gray-200 dark:bg-gray-700 rounded-lg">
-                    {postTypes.map(type => (
-                        <button key={type} type="button" onClick={() => setPostType(type)} className={`w-full px-4 py-2 text-sm font-bold rounded-md transition-colors ${postType === type ? 'bg-white dark:bg-gray-900 text-pink-600 shadow' : 'text-gray-600 dark:text-gray-300'}`}>
-                            {type.charAt(0).toUpperCase() + type.slice(1)}
-                        </button>
-                    ))}
-                </div>
+    try {
+      // Step 1: Verify captcha
+      const captchaRes = await fetch(`${API_URL}/captcha/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ captcha_token: captchaToken, answer: captchaAnswer })
+      });
+      const captchaData = await captchaRes.json();
+      if (!captchaData.success) {
+        loadCaptcha();
+        throw new Error("Captcha verification failed");
+      }
 
-                <div>
-                    <label className="block font-semibold mb-2" htmlFor="post-title">Title</label>
-                    <input id="post-title" type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Your Post Title" className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600" />
-                </div>
-                
-                {renderContentInput()}
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block font-semibold mb-2" htmlFor="post-category">Category</label>
-                        <select id="post-category" value={categoryId} onChange={e => setCategoryId(e.target.value)} className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600">
-                            <option value="" disabled>Select a category</option>
-                            {categories.map(cat => (
-                                <option key={cat.id} value={cat.id}>{cat.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block font-semibold mb-2" htmlFor="post-tags">Tags (comma-separated)</label>
-                        <input id="post-tags" type="text" value={tags} onChange={e => setTags(e.target.value)} placeholder="e.g., tech, travel, photography" className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600" />
-                    </div>
-                </div>
+      // Step 2: Upload media if needed
+      let mediaUrls = [];
+      if (['photo', 'video', 'audio'].includes(postType) && mediaFiles.length > 0) {
+        const uploadPromises = mediaFiles.map(file => {
+          const formData = new FormData();
+          formData.append('file', file);
+          return fetch(`${API_URL}/upload`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData,
+          }).then(res => {
+            if (!res.ok) throw new Error(`File upload failed for ${file.name}.`);
+            return res.json();
+          });
+        });
 
-                <div>
-                </div>
-                
-                <button type="submit" disabled={isSubmitting} className="w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold py-3 px-4 rounded-lg disabled:opacity-50">
-                    {isSubmitting ? 'Submitting...' : 'Publish Post'}
-                </button>
-            </form>
+        const uploadResults = await Promise.all(uploadPromises);
+        mediaUrls = uploadResults.map(result => result.file_url);
+      }
+
+      // Step 3: Create post
+      const postData = {
+        type: postType,
+        title: title.trim(),
+        content: postType === 'text' ? content.trim() : null,
+        media_urls: mediaUrls,
+        tags: tags.trim(),
+        attribution: attribution.trim(),
+        license: licenseText.trim(),
+        category_id: categoryId,
+      };
+
+      const postRes = await fetch(`${API_URL}/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(postData),
+      });
+
+      if (!postRes.ok) {
+        const errData = await postRes.json().catch(() => ({}));
+        throw new Error(errData.message || 'Failed to create post.');
+      }
+
+      setSuccess('Post created successfully!');
+      setTitle('');
+      setContent('');
+      setTags('');
+      setAttribution('');
+      setLicenseText('');
+      setMediaFiles([]);
+      setCaptchaAnswer('');
+      loadCaptcha();
+
+      setTimeout(() => setPage({ name: 'home' }), 1500);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const renderContentInput = () => {
+    switch (postType) {
+      case 'photo':
+      case 'video':
+      case 'audio':
+        return (
+          <div>
+            <label htmlFor="file-upload" className="block font-semibold mb-2">Upload File</label>
+            <input id="file-upload" type="file" multiple onChange={handleFileChange} required
+              className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4
+              file:rounded-full file:border-0 file:text-sm file:font-semibold
+              file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100"/>
+          </div>
+        );
+      default:
+        return (
+          <div>
+            <label htmlFor="content-input" className="block font-semibold mb-2">Content (Markdown supported)</label>
+            <textarea id="content-input" value={content} onChange={e => setContent(e.target.value)} rows="10"
+              className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600 font-mono"></textarea>
+          </div>
+        );
+    }
+  };
+
+  const postTypes = ['text', 'photo', 'video', 'audio'];
+
+  return (
+    <div className="max-w-3xl mx-auto mt-10 p-4">
+      <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 shadow-xl rounded-lg p-8 space-y-6">
+        <h2 className="text-3xl font-bold text-center">Create a New Post</h2>
+
+        {error && <p className="bg-red-100 text-red-700 p-3 rounded text-center text-sm">{error}</p>}
+        {success && <p className="bg-green-100 text-green-700 p-3 rounded text-center text-sm">{success}</p>}
+
+        {/* Post type selector */}
+        <div className="flex justify-center space-x-2 p-1 bg-gray-200 dark:bg-gray-700 rounded-lg">
+          {postTypes.map(type => (
+            <button key={type} type="button" onClick={() => handlePostTypeChange(type)}
+              className={`w-full px-4 py-2 text-sm font-bold rounded-md transition-colors
+                ${postType === type ? 'bg-white dark:bg-gray-900 text-pink-600 shadow'
+                  : 'text-gray-600 dark:text-gray-300'}`}>
+              {type.charAt(0).toUpperCase() + type.slice(1)}
+            </button>
+          ))}
         </div>
-    );
+
+        {/* Title */}
+        <div>
+          <label htmlFor="title-input" className="block font-semibold mb-2">Title</label>
+          <input id="title-input" type="text" value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="Your Post Title"
+            className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600"/>
+        </div>
+
+        {renderContentInput()}
+
+        {/* Category & Tags */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label htmlFor="category-select" className="block font-semibold mb-2">Category</label>
+            <select id="category-select" value={categoryId} onChange={e => setCategoryId(e.target.value)}
+              className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600">
+              <option value="" disabled>Select a category</option>
+              {categories.map(cat => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="tags-input" className="block font-semibold mb-2">Tags (comma-separated)</label>
+            <input id="tags-input" type="text" value={tags} onChange={e => setTags(e.target.value)}
+              placeholder="e.g., tech, travel"
+              className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600"/>
+          </div>
+        </div>
+
+        {/* Attribution & License */}
+        <div>
+          <label htmlFor="attribution-input" className="block font-semibold mb-2">Attribution (optional)</label>
+          <input id="attribution-input" type="text" value={attribution} onChange={e => setAttribution(e.target.value)}
+            placeholder="e.g. Photo by John Doe"
+            className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600"/>
+        </div>
+        <div>
+          <label htmlFor="license-input" className="block font-semibold mb-2">License (optional, max 255 chars)</label>
+          <input id="license-input" type="text" value={licenseText} onChange={e => setLicenseText(e.target.value)} maxLength={255}
+            placeholder="e.g. CC-BY-SA 4.0"
+            className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600"/>
+        </div>
+
+        {/* Captcha */}
+        <div>
+          <label htmlFor="captcha-input" className="block font-semibold mb-2">Captcha Challenge</label>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm text-gray-600 dark:text-gray-400">{captchaQuestion}</p>
+            <button type="button" onClick={loadCaptcha}
+              className="text-sm text-pink-600 hover:underline">
+              Refresh
+            </button>
+          </div>
+          <input id="captcha-input" type="text" value={captchaAnswer} onChange={e => setCaptchaAnswer(e.target.value)}
+            placeholder="Enter your answer"
+            className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600"/>
+        </div>
+
+
+        <button type="submit" disabled={isSubmitting || !captchaToken}
+          className="w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold py-3 px-4 rounded-lg disabled:opacity-50">
+          {isSubmitting ? 'Submitting...' : 'Publish Post'}
+        </button>
+
+      </form>
+    </div>
+  );
 };
 
 export default CreatePostPage;

@@ -10,6 +10,9 @@ from datetime import datetime
 import psycopg2.extras
 import os
 from werkzeug.utils import secure_filename
+import random
+import string
+
 
 # --- App Initialization & Config ---
 app = Flask(__name__, static_folder='uploads', static_url_path='/uploads')
@@ -311,13 +314,16 @@ def create_post():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        attribution = data.get('attribution')
+        license = data.get('license')
+
 
         # Use the first media URL as the primary 'image_url' for thumbnails/previews
         primary_media_url = media_urls[0] if media_urls else None
 
         cur.execute(
-            "INSERT INTO posts (user_id, type, title, content, image_url, category_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id", 
-            (user_id, post_type, title, content, primary_media_url, category_id)
+            "INSERT INTO posts (user_id, type, title, content, attribution, license, image_url, category_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, post_type, title, content, attribution, license, primary_media_url, category_id)
         )
         post_id = cur.fetchone()[0]
         
@@ -348,36 +354,60 @@ def update_post(post_id):
     invalidate_post_caches(post_id)  # Invalidate relevant caches
     current_user_id = int(get_jwt_identity())
     data = request.get_json()
-    if not data.get('title'): return jsonify({"message": "Title is required"}), 400
-    
-    title, content = data.get('title'), data.get('content')
+
+    if not data.get('title'):
+        return jsonify({"message": "Title is required"}), 400
+
+    # Extract fields from request
+    title = data.get('title')
+    content = data.get('content')
     tags_string = data.get('tags', '')
     category_id = data.get('category_id')
+    attribution = data.get('attribution')
+    license = data.get('license')
 
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
+        # Verify ownership of post
         cur.execute("SELECT user_id FROM posts WHERE id = %s", (post_id,))
         post = cur.fetchone()
-        if not post: return jsonify({"message": "Post not found"}), 404
-        if post['user_id'] != current_user_id: return jsonify({"message": "Forbidden"}), 403
-        
-        cur.execute("UPDATE posts SET title = %s, content = %s, category_id = %s WHERE id = %s", (title, content, category_id, post_id))
-        
-        # Easiest way to update tags is to clear old ones and add new ones
+        if not post:
+            return jsonify({"message": "Post not found"}), 404
+        if post['user_id'] != current_user_id:
+            return jsonify({"message": "Forbidden"}), 403
+
+        # Update post fields
+        cur.execute(
+            """
+            UPDATE posts
+            SET title = %s,
+                content = %s,
+                attribution = %s,
+                license = %s,
+                category_id = %s
+            WHERE id = %s
+            """,
+            (title, content, attribution, license, category_id, post_id)
+        )
+
+        # Update tags (clear + add new ones)
         cur.execute("DELETE FROM post_tags WHERE post_id = %s", (post_id,))
         manage_tags(cur, post_id, tags_string)
-        
+
         conn.commit()
         cur.close()
-        return jsonify({"message": "Post updated successfully"})
+        return jsonify({"message": "Post updated successfully"}), 200
+
     except (Exception, psycopg2.DatabaseError) as error:
         print(f"DATABASE ERROR updating post: {error}")
         return jsonify({"message": "Database error"}), 500
+
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
 @app.route('/posts/<int:post_id>', methods=['DELETE'])
 @jwt_required()
@@ -790,6 +820,45 @@ def sitemap():
     finally:
         if conn: conn.close()
 
+captchas = {}
+
+def generate_token(length=12):
+    """Generate a random token for captcha session"""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+@app.route('/captcha/new', methods=['GET'])
+def new_captcha():
+    """Generate a new math captcha"""
+    num1 = random.randint(1, 9)
+    num2 = random.randint(1, 9)
+    question = f"What is {num1} + {num2}?"
+    answer = str(num1 + num2)
+
+    token = generate_token()
+    captchas[token] = answer
+
+    return jsonify({
+        "captcha_token": token,
+        "question": question
+    })
+
+@app.route('/captcha/verify', methods=['POST'])
+def verify_captcha():
+    """Verify captcha answer"""
+    data = request.get_json()
+    token = data.get("captcha_token")
+    user_answer = str(data.get("answer"))
+
+    if not token or token not in captchas:
+        return jsonify({"success": False, "error": "Invalid or expired captcha"}), 400
+
+    correct_answer = captchas[token]
+    del captchas[token]  # One-time use
+
+    if user_answer == correct_answer:
+        return jsonify({"success": True, "message": "Captcha passed"})
+    else:
+        return jsonify({"success": False, "error": "Incorrect answer"}), 400
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
