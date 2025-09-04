@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import { UserIcon, TagIcon } from './Icons'; // Corrected import path
+import { UserIcon, TagIcon } from './Icons';
 import MediaRenderer from './MediaRenderer';
 import CommentSection from './CommentSection';
 import LikeButton from './LikeButton';
+import MarkdownRenderer from './MarkdownRenderer';
+import WebmentionList from './WebmentionList';
+import { Helmet } from 'react-helmet-async';
 
 const API_URL = "http://localhost:5000";
 
@@ -13,43 +15,77 @@ const PostDetailPage = ({ postId, setPage, currentUserId, token }) => {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        if (!postId) {
-            setError("No post ID provided.");
-            setLoading(false);
-            return;
-        }
-
-        // Create headers object with Authorization if token exists
-        const headers = {
-            'Content-Type': 'application/json'
-        };
+        let isMounted = true;  // For cleanup
         
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
+        const fetchPost = async () => {
+            if (!postId) {
+                if (isMounted) {
+                    setError("No post ID provided.");
+                    setLoading(false);
+                }
+                return;
+            }
 
-        fetch(`${API_URL}/posts/${postId}`, {
-            method: 'GET',
-            headers: headers
-        })
-            .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch post'))
-            .then(data => {
-                setPost(data);
-                setLoading(false);
-            })
-            .catch(err => {
+            try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...(token && { 'Authorization': `Bearer ${token}` })
+                };
+
+                const response = await fetch(`${API_URL}/posts/${postId}?_=${Date.now()}`, {
+                    method: 'GET',
+                    headers,
+                    cache: 'no-store'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch post');
+                }
+
+                const data = await response.json();
+                
+                if (isMounted) {
+                    setPost(data);
+                    setLoading(false);
+                    setError(null);
+                }
+            } catch (err) {
                 console.error('Error fetching post:', err);
-                setError(err.toString());
-                setLoading(false);
-            });
-    }, [postId, token]); // Added token as dependency
+                if (isMounted) {
+                    setError(err.toString());
+                    setLoading(false);
+                }
+            }
+        };
+
+        setLoading(true);  // Reset loading state on each postId change
+        fetchPost();
+
+        // Cleanup function
+        return () => {
+            isMounted = false;
+        };
+    }, [postId, token]);
 
     if (loading) return <div className="text-center p-8">Loading post...</div>;
     if (error) return <div className="text-center p-8 text-red-500">Error: {error}</div>;
     if (!post) return <div className="text-center p-8">Post not found.</div>;
 
     return (
-        <main className="max-w-3xl mx-auto p-6 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg mt-8">
+        <div>
+            <Helmet>
+                <title>{post.title} - Chyrp Lite</title>
+                <link 
+                    rel="webmention" 
+                    href={`${API_URL}/webmention`} 
+                />
+                {/* Add canonical URL for webmentions to properly target */}
+                <link 
+                    rel="canonical" 
+                    href={`${window.location.origin}/posts/${postId}`}
+                />
+            </Helmet>
+            <main className="max-w-3xl mx-auto p-6 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg mt-8">
             <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 border-b-2 border-pink-500 pb-4">{post.title}</h1>
             
             <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
@@ -82,7 +118,7 @@ const PostDetailPage = ({ postId, setPage, currentUserId, token }) => {
             )}
 
             <div className="prose dark:prose-invert max-w-none mt-4 text-lg">
-                {post.type === 'text' && <ReactMarkdown>{post.content}</ReactMarkdown>}
+                {post.type === 'text' && <MarkdownRenderer content={post.content} />}
             </div>
 
             {post.tags && post.tags.length > 0 && (
@@ -107,10 +143,15 @@ const PostDetailPage = ({ postId, setPage, currentUserId, token }) => {
                 <CommentSection postId={postId} token={token} currentUserId={currentUserId} />
             </div>
 
+            <div className="mt-8 pt-8 border-t dark:border-gray-700">
+                <WebmentionList postId={postId} />
+            </div>
+
             <button onClick={() => setPage({ name: 'home' })} className="mt-8 px-6 py-2 bg-pink-600 text-white font-semibold rounded-lg hover:bg-pink-700 transition-colors shadow-md">
                 &larr; Back to Home
             </button>
         </main>
+        </div>
     );
 };
 

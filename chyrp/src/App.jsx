@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { HelmetProvider, Helmet } from 'react-helmet-async';
 
 // Correctly import all the components from their new files
 import HomePage from './components/HomePage.jsx';
@@ -37,6 +38,11 @@ export default function App() {
   const [page, setPage] = useState({ name: 'home' });
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
+
+  // Debug log for page state changes
+  useEffect(() => {
+    console.log('Page state changed:', page);
+  }, [page]);
   
   // Get the current user's ID from the token's 'sub' (subject) claim
   const decodedToken = parseJwt(token);
@@ -64,6 +70,15 @@ export default function App() {
 
   // The "Router" for our application
   const renderPage = () => {
+    // Clear any cached data when switching pages
+    useEffect(() => {
+      if (page.name === 'post-detail') {
+        // Force a fresh fetch when viewing a post
+        const cacheBuster = Date.now();
+        console.log('Rendering post detail with cache buster:', cacheBuster);
+      }
+    }, [page]);
+
     switch (page.name) {
       case 'login':
         return <LoginPage onLoginSuccess={handleLoginSuccess} setPage={setPage} />;
@@ -76,7 +91,7 @@ export default function App() {
         if (!token) return <LoginPage onLoginSuccess={handleLoginSuccess} setPage={setPage} />;
         return <EditPostPage token={token} setPage={setPage} postId={page.postId} />;
       case 'post-detail':
-        return <PostDetailPage postId={page.postId} setPage={setPage} token={token} currentUserId={currentUserId} />;
+        return <PostDetailPage key={page.postId} postId={page.postId} setPage={setPage} token={token} currentUserId={currentUserId} />;
       case 'tag':
         return <TagPage tagName={page.tagName} setPage={setPage} token={token} currentUserId={currentUserId} />;
       case 'category':
@@ -92,7 +107,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-300">
+    <HelmetProvider>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-300">
+        <Helmet defaultTitle="Chyrp Lite" titleTemplate="%s - Chyrp Lite" />
       <header className="bg-white dark:bg-gray-800 shadow-md p-4 flex items-center justify-between sticky top-0 z-10">
         <h1 className="text-2xl font-bold text-pink-600 dark:text-pink-400 cursor-pointer" onClick={() => setPage({ name: 'home' })}>
           Chyrp Lite
@@ -107,5 +124,6 @@ export default function App() {
       
       {renderPage()}
     </div>
+    </HelmetProvider>
   );
 }

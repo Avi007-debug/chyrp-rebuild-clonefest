@@ -1,13 +1,23 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { LinkIcon, UserIcon, EditIcon, TrashIcon, MessageCircleIcon } from './Icons.jsx';
 import MediaRenderer from './MediaRenderer.jsx';
 import CommentSection from './CommentSection.jsx';
 import LikeButton from './LikeButton.jsx';
+import MarkdownRenderer from './MarkdownRenderer.jsx';
 
 const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
     const isAuthor = post.user_id === currentUserId;
     const [showComments, setShowComments] = useState(false);
+
+    const handleViewPost = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Viewing post:', post.id); // Debug log
+        setPage({ 
+            name: 'post-detail', 
+            postId: post.id
+        });
+    };
 
     const renderPostContent = () => {
         switch (post.type) {
@@ -24,10 +34,8 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
             default:
                 return (
                     <div className="p-6">
-                        <h2 className="text-xl font-bold mb-2 cursor-pointer hover:text-pink-600" onClick={() => setPage({ name: 'post-detail', postId: post.id })}>{post.title}</h2>
-                        <div className="prose dark:prose-invert max-w-none">
-                            <ReactMarkdown>{post.content}</ReactMarkdown>
-                        </div>
+                        <h2 className="text-xl font-bold mb-2 cursor-pointer hover:text-pink-600" onClick={handleViewPost}>{post.title}</h2>
+                        <div className="prose dark:prose-invert max-w-none"><MarkdownRenderer content={post.content} /></div>
                     </div>
                 );
         }
@@ -94,7 +102,7 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                     )}
                     {/* View Post button */}
                     <button
-                        onClick={() => setPage({ name: 'post-detail', postId: post.id })}
+                        onClick={handleViewPost}
                         className="p-2 rounded-md text-pink-600 bg-pink-100 hover:bg-pink-200 font-bold transition-colors"
                     >
                         View Post

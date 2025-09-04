@@ -10,6 +10,15 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
     const [tagQuery, setTagQuery] = useState("");
     const [filteredPosts, setFilteredPosts] = useState([]);
 
+    // Clear any cached state when mounting HomePage
+    useEffect(() => {
+        return () => {
+            // Cleanup function to run when component unmounts
+            setPosts([]);
+            setFilteredPosts([]);
+        };
+    }, []);
+
     useEffect(() => {
         const fetchPosts = () => {
             fetch(`${API_URL}/posts`)

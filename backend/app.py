@@ -5,6 +5,8 @@ from flask_caching import Cache # type: ignore
 from flask_jwt_extended import create_access_token, JWTManager, jwt_required, get_jwt_identity, verify_jwt_in_request
 import boto3
 import psycopg2
+from flask import make_response
+from datetime import datetime
 import psycopg2.extras
 import os
 from werkzeug.utils import secure_filename
@@ -194,9 +196,10 @@ def get_posts():
 
 # --- Single Post Detail Endpoint (with View Count Logic) ---
 @app.route('/posts/<int:post_id>', methods=['GET'])
-@cache.cached(timeout=300, key_prefix='post_')  # Cache for 5 minutes
+@cache.memoize(timeout=300)  # Use memoize instead of cached to include parameters in cache key
 def get_post(post_id):
     """Fetches a single post by its ID and increments the view count."""
+    print(f"Fetching post with ID: {post_id}")  # Debug log
     user_id = None
     try:
         # Check for a token, but don't require one
@@ -204,7 +207,8 @@ def get_post(post_id):
         user_id = get_jwt_identity()
         # Convert to int if not None for consistency
         user_id = int(user_id) if user_id else None
-    except Exception:
+    except Exception as e:
+        print(f"Token verification exception (non-critical): {e}")
         user_id = None
 
     conn = None
@@ -212,8 +216,9 @@ def get_post(post_id):
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+        print(f"Executing query for post {post_id} with user_id {user_id}")  # Debug log
         # Get the post and its author with like count in a single query
-        cur.execute("""
+        query = """
             SELECT 
                 p.*, 
                 u.username,
@@ -231,11 +236,13 @@ def get_post(post_id):
             ) lc ON p.id = lc.post_id
             LEFT JOIN categories cat ON p.category_id = cat.id
             WHERE p.id = %s
-        """, (user_id, user_id, post_id, post_id))
+        """
         
+        cur.execute(query, (user_id, user_id, post_id))
         post = cur.fetchone()
 
         if not post:
+            print(f"Post {post_id} not found")  # Debug log
             return jsonify({"message": "Post not found"}), 404
 
         # --- View Count Logic ---
@@ -274,11 +281,17 @@ def get_post(post_id):
         return jsonify(post_data)
 
     except (Exception, psycopg2.DatabaseError) as error:
-        print(f"ERROR in get_post: {error}")  # Keep some logging for debugging
-        return jsonify({"message": "Database error"}), 500
+        print(f"ERROR in get_post: {error}")
+        print(f"Error details: {type(error).__name__}: {str(error)}")  # Detailed error logging
+        import traceback
+        print("Traceback:", traceback.format_exc())  # Print full traceback
+        return jsonify({"message": "Database error", "error": str(error)}), 500
     finally:
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception as e:
+                print(f"Error closing connection: {e}")  # Log connection closing errors
 @app.route('/posts', methods=['POST'])
 @jwt_required()
 def create_post():
@@ -619,6 +632,161 @@ def get_posts_by_category(category_slug):
     except Exception as e:
         print(f"DB Error fetching posts by category: {e}")
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
+    finally:
+        if conn: conn.close()
+
+# ====================================================================
+# --- NEW: Webmention Endpoints ---
+# ====================================================================
+@app.route('/webmention', methods=['POST'])
+def receive_webmention():
+    """Handle incoming webmentions."""
+    data = request.get_json()
+    print("Received webmention data:", data)  # Debug print
+    
+    # Validate required fields
+    if not data or 'source' not in data or 'target' not in data:
+        return jsonify({"message": "Missing required fields (source and target)"}), 400
+    
+    source_url = data['source']
+    target_url = data['target']
+    mention_type = data.get('type', 'mention')
+    author_info = data.get('author', {})
+    if isinstance(author_info, dict):
+        author_name = author_info.get('name')
+        author_url = author_info.get('url')
+        author_photo = author_info.get('photo')
+    else:
+        author_name = author_url = author_photo = None
+    content = data.get('content')
+    
+    # Extract post ID from target URL
+    # Assuming target URL format: http://yourdomain.com/posts/{post_id}
+    try:
+        post_id = int(target_url.split('/posts/')[-1])
+        print(f"Extracted post_id: {post_id}")  # Debug print
+    except (ValueError, IndexError) as e:
+        print(f"Error extracting post_id: {e}")  # Debug print
+        return jsonify({"message": "Invalid target URL"}), 400
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check if the post exists
+        cur.execute("SELECT id FROM posts WHERE id = %s", (post_id,))
+        post = cur.fetchone()
+        print(f"Found post: {post}")  # Debug print
+        
+        if not post:
+            return jsonify({"message": "Target post not found"}), 404
+        
+        # Store the webmention
+        insert_query = """
+            INSERT INTO webmentions 
+            (post_id, source_url, target_url, mention_type, author_name, author_url, author_photo, content, verified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true)
+            RETURNING id
+        """
+        values = (post_id, source_url, target_url, mention_type, author_name, author_url, author_photo, content)
+        print(f"Inserting webmention with values: {values}")  # Debug print
+        
+        cur.execute(insert_query, values)
+        webmention_id = cur.fetchone()[0]
+        conn.commit()
+        print(f"Inserted webmention with id: {webmention_id}")  # Debug print
+        
+        # Invalidate relevant caches
+        invalidate_post_caches(post_id)
+        
+        return jsonify({
+            "message": "Webmention received successfully",
+            "id": webmention_id
+        }), 201
+        
+    except Exception as e:
+        print(f"Error processing webmention: {e}")
+        return jsonify({"message": "Error processing webmention"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/posts/<int:post_id>/webmentions', methods=['GET'])
+def get_webmentions(post_id):
+    """Get all webmentions for a post."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        cur.execute("""
+            SELECT * FROM webmentions 
+            WHERE post_id = %s AND verified = true 
+            ORDER BY published_at DESC
+        """, (post_id,))
+        
+        webmentions = [dict(mention) for mention in cur.fetchall()]
+        return jsonify(webmentions)
+        
+    except Exception as e:
+        print(f"Error fetching webmentions: {e}")
+        return jsonify({"message": "Error fetching webmentions"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+# ====================================================================
+# --- NEW: Sitemap Endpoint ---
+# ====================================================================
+@app.route('/sitemap.xml')
+def sitemap():
+    """Generates a sitemap.xml file for SEO."""
+    
+    # NOTE: For this to be effective, your frontend must use a URL routing library
+    # (like React Router) so that pages like /posts/123 are actual navigable URLs.
+    # This URL should be your public frontend domain, not the backend's.
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # Static pages (just the home page for now)
+        static_urls = [{'loc': base_url, 'lastmod': datetime.now().strftime('%Y-%m-%d')}]
+
+        # Post pages
+        cur.execute("SELECT id, updated_at FROM posts ORDER BY updated_at DESC")
+        posts = cur.fetchall()
+        post_urls = [{'loc': f"{base_url}/posts/{post['id']}", 'lastmod': post['updated_at'].strftime('%Y-%m-%d')} for post in posts]
+
+        # Category pages
+        cur.execute("SELECT slug FROM categories")
+        categories = cur.fetchall()
+        category_urls = [{'loc': f"{base_url}/category/{cat['slug']}", 'lastmod': datetime.now().strftime('%Y-%m-%d')} for cat in categories]
+
+        # Tag pages
+        cur.execute("SELECT name FROM tags")
+        tags = cur.fetchall()
+        tag_urls = [{'loc': f"{base_url}/tag/{tag['name']}", 'lastmod': datetime.now().strftime('%Y-%m-%d')} for tag in tags]
+
+        all_urls = static_urls + post_urls + category_urls + tag_urls
+        
+        sitemap_xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        for url_info in all_urls:
+            sitemap_xml += '  <url>\n'
+            sitemap_xml += f"    <loc>{url_info['loc']}</loc>\n"
+            sitemap_xml += f"    <lastmod>{url_info['lastmod']}</lastmod>\n"
+            sitemap_xml += '  </url>\n'
+        sitemap_xml += '</urlset>'
+
+        response = make_response(sitemap_xml)
+        response.headers['Content-Type'] = 'application/xml'
+        return response
+    except Exception as e:
+        print(f"Sitemap Generation Error: {e}")
+        return jsonify({"message": "Could not generate sitemap"}), 500
     finally:
         if conn: conn.close()
 
