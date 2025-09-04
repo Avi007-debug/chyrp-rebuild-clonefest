@@ -26,6 +26,26 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                         <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
                     </div>
                 );
+            case 'video':
+                return (
+                    <div>
+                        <video controls className="w-full h-auto max-h-96 bg-black">
+                            <source src={post.image_url} type="video/mp4" />
+                            Your browser does not support the video tag.
+                        </video>
+                        <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
+                    </div>
+                );
+            case 'audio':
+                return (
+                    <div>
+                        <audio controls className="w-full mt-4">
+                            <source src={post.image_url} type="audio/mpeg" />
+                            Your browser does not support the audio element.
+                        </audio>
+                        <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
+                    </div>
+                );
             case 'quote':
                 return (
                     <div className="p-8 bg-pink-50 dark:bg-pink-900/20">

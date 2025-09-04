@@ -1,17 +1,44 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
+from flask_caching import Cache
 from flask_jwt_extended import create_access_token, JWTManager, jwt_required, get_jwt_identity, verify_jwt_in_request
 import psycopg2
 import psycopg2.extras
 import os
+from werkzeug.utils import secure_filename
 
 # --- App Initialization & Config ---
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+app = Flask(__name__, static_folder='uploads', static_url_path='/uploads')
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 bcrypt = Bcrypt(app)
 app.config["JWT_SECRET_KEY"] = "your-super-secret-key-for-development" 
 jwt = JWTManager(app)
+
+# --- Caching Configuration ---
+app.config['CACHE_TYPE'] = 'SimpleCache'  # In-memory cache for development
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # Default cache timeout in seconds (5 minutes)
+app.config['CACHE_THRESHOLD'] = 1000  # Maximum number of items the cache will store
+app.config['CACHE_KEY_PREFIX'] = 'chyrp_'  # Prefix for all cache keys
+cache = Cache(app)
+
+def invalidate_post_caches(post_id=None):
+    """Helper function to invalidate relevant caches when a post is modified"""
+    cache.delete('all_posts')  # Always invalidate the main posts list
+    cache.delete('popular_posts')  # Invalidate popular posts cache if we implement it
+    if post_id:
+        cache.delete(f'post_{post_id}')  # Invalidate specific post cache
+        cache.delete(f'post_{post_id}_comments')  # Invalidate post's comments cache
+
+# --- File Upload Configuration ---
+# Use an absolute path for the upload folder to avoid ambiguity
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'ogg'}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Create upload directory if it doesn't exist
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # --- Custom JWT Error Handlers ---
 @jwt.unauthorized_loader
@@ -98,6 +125,7 @@ def login():
 # === Blog Post Endpoints ===
 
 @app.route('/posts', methods=['GET'])
+@cache.cached(key_prefix='all_posts')
 def get_posts():
     """
     Fetches all posts.
@@ -147,6 +175,7 @@ def get_posts():
 
 # --- Single Post Detail Endpoint (with View Count Logic) ---
 @app.route('/posts/<int:post_id>', methods=['GET'])
+@cache.cached(timeout=300, key_prefix='post_')  # Cache for 5 minutes
 def get_post(post_id):
     """Fetches a single post by its ID and increments the view count."""
     user_id = None
@@ -227,11 +256,15 @@ def get_post(post_id):
 @app.route('/posts', methods=['POST'])
 @jwt_required()
 def create_post():
+    invalidate_post_caches()  # Invalidate relevant caches
     user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data.get('title'): return jsonify({"message": "Title is required"}), 400
     
-    post_type, title, content = data.get('type', 'text'), data.get('title'), data.get('content')
+    post_type = data.get('type', 'text')
+    title = data.get('title')
+    content = data.get('content')
+    image_url = data.get('image_url')  # Get the image URL if it exists
     tags_string = data.get('tags', '') # Get tags as a comma-separated string
     
     conn = None
@@ -239,8 +272,8 @@ def create_post():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO posts (user_id, type, title, content) VALUES (%s, %s, %s, %s) RETURNING id", 
-            (user_id, post_type, title, content)
+            "INSERT INTO posts (user_id, type, title, content, image_url) VALUES (%s, %s, %s, %s, %s) RETURNING id", 
+            (user_id, post_type, title, content, image_url)
         )
         post_id = cur.fetchone()[0]
         
@@ -259,6 +292,7 @@ def create_post():
 @app.route('/posts/<int:post_id>', methods=['PUT'])
 @jwt_required()
 def update_post(post_id):
+    invalidate_post_caches(post_id)  # Invalidate relevant caches
     current_user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data.get('title'): return jsonify({"message": "Title is required"}), 400
@@ -294,6 +328,7 @@ def update_post(post_id):
 @app.route('/posts/<int:post_id>', methods=['DELETE'])
 @jwt_required()
 def delete_post(post_id):
+    invalidate_post_caches(post_id)  # Invalidate relevant caches
     # ... (code is unchanged) ...
     current_user_id = int(get_jwt_identity())
     conn = None
@@ -315,8 +350,8 @@ def delete_post(post_id):
 
 # === Comment Endpoints (Unchanged) ===
 @app.route('/posts/<int:post_id>/comments', methods=['GET'])
+@cache.cached(timeout=300, key_prefix='post_comments_')  # Cache comments for 5 minutes
 def get_comments(post_id):
-    # ... (code is unchanged) ...
     conn = None
     try:
         conn = get_db_connection()
@@ -333,6 +368,8 @@ def get_comments(post_id):
 @app.route('/posts/<int:post_id>/comments', methods=['POST'])
 @jwt_required()
 def add_comment(post_id):
+    cache.delete(f'view//posts/{post_id}') # Invalidate cache for this specific post
+    cache.delete('all_posts') # Invalidate the cache for the list of all posts
     # ... (code is unchanged) ...
     user_id = int(get_jwt_identity())
     data = request.get_json()
@@ -359,6 +396,7 @@ def add_comment(post_id):
 @app.route('/posts/<int:post_id>/like', methods=['POST'])
 @jwt_required()
 def toggle_like(post_id):
+    invalidate_post_caches(post_id)  # Invalidate relevant caches
     # ... (code is unchanged) ...
     user_id = int(get_jwt_identity())
     conn = None
@@ -384,9 +422,39 @@ def toggle_like(post_id):
         if conn: conn.close()
 
 # ====================================================================
+# --- NEW: Media Upload Endpoints ---
+# ====================================================================
+
+@app.route('/upload', methods=['POST'])
+@jwt_required()
+def upload_media():
+    """Handles uploading of media files (images, videos, audio)."""
+    if 'file' not in request.files:
+        return jsonify({"message": "No file part in the request"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"message": "No file selected for uploading"}), 400
+    
+    if file and allowed_file(file.filename):
+        # Sanitize filename and make it unique to prevent overwrites
+        import uuid
+        filename = secure_filename(file.filename)
+        unique_filename = f"{uuid.uuid4()}_{filename}"
+        
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
+        
+        # Construct the URL for the uploaded file
+        file_url = f"{request.host_url}uploads/{unique_filename}"
+        
+        return jsonify({"message": "File uploaded successfully", "file_url": file_url}), 201
+    else:
+        return jsonify({"message": "File type not allowed"}), 400
+
+# ====================================================================
 # --- NEW: Tag Endpoint ---
 # ====================================================================
 @app.route('/posts/tag/<tag_name>', methods=['GET'])
+@cache.cached(timeout=300, key_prefix='tag_posts_')  # Cache tagged posts for 5 minutes
 def get_posts_by_tag(tag_name):
     """Fetches all posts associated with a specific tag."""
     user_id = None
@@ -425,28 +493,8 @@ def get_posts_by_tag(tag_name):
     finally:
         if conn: conn.close()
 
-# --- Helper Function for Tag Management ---
-def manage_tags(cur, post_id, tags_string):
-    """Handles finding/creating tags and linking them to a post."""
-    if tags_string:
-        tag_names = [tag.strip().lower() for tag in tags_string.split(',') if tag.strip()]
-        tag_ids = []
-        for name in tag_names:
-            cur.execute("SELECT id FROM tags WHERE name = %s", (name,))
-            tag = cur.fetchone()
-            if tag:
-                tag_ids.append(tag[0])
-            else:
-                cur.execute("INSERT INTO tags (name) VALUES (%s) RETURNING id", (name,))
-                tag_ids.append(cur.fetchone()[0])
-        
-        # Link tags to the post
-        for tag_id in tag_ids:
-            cur.execute("INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (post_id, tag_id))
-
 
 
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-

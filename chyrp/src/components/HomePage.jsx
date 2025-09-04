@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PostCard from './PostCard.jsx'; // Corrected the import path
 
-const API_URL = "http://localhost:5000";
+const API_URL = "http://localhost:5000/";
 
 const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
     const [posts, setPosts] = useState([]);
