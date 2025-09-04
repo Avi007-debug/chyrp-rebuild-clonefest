@@ -5,6 +5,9 @@ from flask_jwt_extended import create_access_token, JWTManager, jwt_required, ge
 import psycopg2
 import psycopg2.extras
 import os
+import random
+import string
+
 
 # --- App Initialization & Config ---
 app = Flask(__name__)
@@ -149,9 +152,12 @@ def create_post():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        attribution = data.get('attribution')
+        license = data.get('license')
+
         cur.execute(
-            "INSERT INTO posts (user_id, type, title, content) VALUES (%s, %s, %s, %s) RETURNING id", 
-            (user_id, post_type, title, content)
+            "INSERT INTO posts (user_id, type, title, content, attribution, license) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, post_type, title, content, attribution, license)
         )
         post_id = cur.fetchone()[0]
         
@@ -186,8 +192,13 @@ def update_post(post_id):
         post = cur.fetchone()
         if not post: return jsonify({"message": "Post not found"}), 404
         if post['user_id'] != current_user_id: return jsonify({"message": "Forbidden"}), 403
-        
-        cur.execute("UPDATE posts SET title = %s, content = %s WHERE id = %s", (title, content, post_id))
+        attribution = data.get('attribution')
+        license = data.get('license')
+
+        cur.execute(
+            "UPDATE posts SET title = %s, content = %s, attribution = %s, license = %s WHERE id = %s",
+            (title, content, attribution, license, post_id)
+        )
         
         # Easiest way to update tags is to clear old ones and add new ones
         cur.execute("DELETE FROM post_tags WHERE post_id = %s", (post_id,))
@@ -373,6 +384,45 @@ def get_post(post_id):
         if conn:
             conn.close()
 
+captchas = {}
+
+def generate_token(length=12):
+    """Generate a random token for captcha session"""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+@app.route('/captcha/new', methods=['GET'])
+def new_captcha():
+    """Generate a new math captcha"""
+    num1 = random.randint(1, 9)
+    num2 = random.randint(1, 9)
+    question = f"What is {num1} + {num2}?"
+    answer = str(num1 + num2)
+
+    token = generate_token()
+    captchas[token] = answer
+
+    return jsonify({
+        "captcha_token": token,
+        "question": question
+    })
+
+@app.route('/captcha/verify', methods=['POST'])
+def verify_captcha():
+    """Verify captcha answer"""
+    data = request.get_json()
+    token = data.get("captcha_token")
+    user_answer = str(data.get("answer"))
+
+    if not token or token not in captchas:
+        return jsonify({"success": False, "error": "Invalid or expired captcha"}), 400
+
+    correct_answer = captchas[token]
+    del captchas[token]  # One-time use
+
+    if user_answer == correct_answer:
+        return jsonify({"success": True, "message": "Captcha passed"})
+    else:
+        return jsonify({"success": False, "error": "Incorrect answer"}), 400
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

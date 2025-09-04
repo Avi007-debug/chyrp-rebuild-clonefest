@@ -35,11 +35,14 @@ const PostDetailPage = ({ postId, setPage }) => {
             </div>
             <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                 <UserIcon className="h-5 w-5 text-gray-400" />
-                <span>Posted by <span className="font-medium text-gray-700 dark:text-gray-300">{post.username}</span></span>
+                <span>
+                    Posted by <span className="font-medium text-gray-700 dark:text-gray-300">{post.username}</span>
+                </span>
                 {typeof post.view_count === 'number' && (
                     <span className="ml-4 text-xs text-gray-400">{post.view_count} views</span>
                 )}
             </div>
+
             {/* Tags section */}
             {post.tags && post.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
@@ -54,7 +57,26 @@ const PostDetailPage = ({ postId, setPage }) => {
                     ))}
                 </div>
             )}
-            <button onClick={() => setPage({ name: 'home' })} className="mt-6 px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 transition-colors">Back to Home</button>
+
+            {/* Attribution & License */}
+            {post.attribution && (
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">
+                    <strong>Attribution:</strong> {post.attribution}
+                </p>
+            )}
+
+            {post.license && (
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <strong>License:</strong> {post.license}
+                </p>
+            )}
+
+            <button
+                onClick={() => setPage({ name: 'home' })}
+                className="mt-6 px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 transition-colors"
+            >
+                Back to Home
+            </button>
         </main>
     );
 };
