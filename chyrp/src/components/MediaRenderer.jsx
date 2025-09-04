@@ -27,11 +27,9 @@ const MediaRenderer = ({ post }) => {
 
         case 'text':
         default:
-            return (
-                <div className="prose dark:prose-invert max-w-none">
-                    <ReactMarkdown>{post.content}</ReactMarkdown>
-                </div>
-            );
+            // For text posts, the content is rendered outside this component
+            // to allow for different layouts (e.g., on PostDetailPage).
+            return null;
     }
 };
 

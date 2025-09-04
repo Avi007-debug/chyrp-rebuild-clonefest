@@ -7,6 +7,8 @@ import RegisterPage from './components/RegisterPage.jsx';
 import CreatePostPage from './components/CreatePostPage.jsx';
 import EditPostPage from './components/EditPostPage.jsx';
 import PostDetailPage from './components/PostDetailPage.jsx';
+import TagPage from './components/TagPage.jsx';
+import CategoryPage from './components/CategoryPage.jsx';
 import ProfileDropdown from './components/ProfileDropdown.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { PlusCircleIcon } from './components/Icons.jsx';
@@ -75,6 +77,10 @@ export default function App() {
         return <EditPostPage token={token} setPage={setPage} postId={page.postId} />;
       case 'post-detail':
         return <PostDetailPage postId={page.postId} setPage={setPage} token={token} currentUserId={currentUserId} />;
+      case 'tag':
+        return <TagPage tagName={page.tagName} setPage={setPage} token={token} currentUserId={currentUserId} />;
+      case 'category':
+        return <CategoryPage categorySlug={page.categorySlug} setPage={setPage} token={token} currentUserId={currentUserId} />;
       default:
         return <HomePage 
                     setPage={setPage} 
@@ -103,4 +109,3 @@ export default function App() {
     </div>
   );
 }
-

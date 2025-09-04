@@ -1,8 +1,9 @@
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
-from flask_caching import Cache
+from flask_caching import Cache # type: ignore
 from flask_jwt_extended import create_access_token, JWTManager, jwt_required, get_jwt_identity, verify_jwt_in_request
+import boto3
 import psycopg2
 import psycopg2.extras
 import os
@@ -29,6 +30,20 @@ def invalidate_post_caches(post_id=None):
     if post_id:
         cache.delete(f'post_{post_id}')  # Invalidate specific post cache
         cache.delete(f'post_{post_id}_comments')  # Invalidate post's comments cache
+        # NEW: Invalidate category cache if we have one
+        # For now, just invalidating all posts is enough.
+
+# --- AWS S3 Configuration (for Vercel deployment) ---
+S3_BUCKET = os.getenv('S3_BUCKET_NAME')
+S3_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
+S3_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+S3_REGION = os.getenv('AWS_REGION', 'us-east-1')
+
+s3_client = None
+if S3_BUCKET and S3_ACCESS_KEY and S3_SECRET_KEY:
+    s3_client = boto3.client('s3', aws_access_key_id=S3_ACCESS_KEY, aws_secret_access_key=S3_SECRET_KEY)
+
+
 
 # --- File Upload Configuration ---
 # Use an absolute path for the upload folder to avoid ambiguity
@@ -147,9 +162,11 @@ def get_posts():
             SELECT 
                 p.*, 
                 u.username,
+                cat.name as category_name, cat.slug as category_slug,
                 COALESCE(lc.like_count, 0) AS like_count,
                 EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) AS liked_by_user,
-                ARRAY_AGG(t.name) FILTER (WHERE t.name IS NOT NULL) as tags
+                ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL) as tags,
+                ARRAY_AGG(DISTINCT pm.media_url) FILTER (WHERE pm.media_url IS NOT NULL) as media_urls
             FROM posts p
             JOIN users u ON p.user_id = u.id
             LEFT JOIN (
@@ -159,7 +176,9 @@ def get_posts():
             ) lc ON p.id = lc.post_id
             LEFT JOIN post_tags pt ON p.id = pt.post_id
             LEFT JOIN tags t ON pt.tag_id = t.id
-            GROUP BY p.id, u.username, lc.like_count
+            LEFT JOIN post_media pm ON p.id = pm.post_id
+            LEFT JOIN categories cat ON p.category_id = cat.id
+            GROUP BY p.id, u.username, lc.like_count, cat.name, cat.slug
             ORDER BY p.created_at DESC;
         """
         
@@ -198,6 +217,7 @@ def get_post(post_id):
             SELECT 
                 p.*, 
                 u.username,
+                cat.name as category_name, cat.slug as category_slug,
                 COALESCE(lc.like_count, 0) AS like_count,
                 CASE WHEN %s IS NOT NULL THEN 
                     EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) 
@@ -209,8 +229,9 @@ def get_post(post_id):
                 FROM post_likes
                 GROUP BY post_id
             ) lc ON p.id = lc.post_id
+            LEFT JOIN categories cat ON p.category_id = cat.id
             WHERE p.id = %s
-        """, (user_id, user_id, post_id))
+        """, (user_id, user_id, post_id, post_id))
         
         post = cur.fetchone()
 
@@ -241,9 +262,14 @@ def get_post(post_id):
         """, (post_id,))
         tags = [row['name'] for row in cur.fetchall()]
 
+        # Get all media URLs for the post
+        cur.execute("SELECT media_url FROM post_media WHERE post_id = %s ORDER BY id ASC", (post_id,))
+        media_urls = [row['media_url'] for row in cur.fetchall()]
+
         # Prepare the final response
         post_data = dict(post)
         post_data['tags'] = tags
+        post_data['media_urls'] = media_urls
 
         return jsonify(post_data)
 
@@ -264,21 +290,35 @@ def create_post():
     post_type = data.get('type', 'text')
     title = data.get('title')
     content = data.get('content')
-    image_url = data.get('image_url')  # Get the image URL if it exists
+    media_urls = data.get('media_urls', []) # Get the list of media URLs
     tags_string = data.get('tags', '') # Get tags as a comma-separated string
+    category_id = data.get('category_id') # Get category ID
     
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Use the first media URL as the primary 'image_url' for thumbnails/previews
+        primary_media_url = media_urls[0] if media_urls else None
+
         cur.execute(
-            "INSERT INTO posts (user_id, type, title, content, image_url) VALUES (%s, %s, %s, %s, %s) RETURNING id", 
-            (user_id, post_type, title, content, image_url)
+            "INSERT INTO posts (user_id, type, title, content, image_url, category_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id", 
+            (user_id, post_type, title, content, primary_media_url, category_id)
         )
         post_id = cur.fetchone()[0]
         
         # Use the helper to manage tags
         manage_tags(cur, post_id, tags_string)
+
+        # NEW: Insert all media URLs into post_media table
+        if media_urls:
+            media_records = [(post_id, url) for url in media_urls]
+            psycopg2.extras.execute_values(
+                cur,
+                "INSERT INTO post_media (post_id, media_url) VALUES %s",
+                media_records
+            )
 
         conn.commit()
         cur.close()
@@ -299,6 +339,7 @@ def update_post(post_id):
     
     title, content = data.get('title'), data.get('content')
     tags_string = data.get('tags', '')
+    category_id = data.get('category_id')
 
     conn = None
     try:
@@ -310,7 +351,7 @@ def update_post(post_id):
         if not post: return jsonify({"message": "Post not found"}), 404
         if post['user_id'] != current_user_id: return jsonify({"message": "Forbidden"}), 403
         
-        cur.execute("UPDATE posts SET title = %s, content = %s WHERE id = %s", (title, content, post_id))
+        cur.execute("UPDATE posts SET title = %s, content = %s, category_id = %s WHERE id = %s", (title, content, category_id, post_id))
         
         # Easiest way to update tags is to clear old ones and add new ones
         cur.execute("DELETE FROM post_tags WHERE post_id = %s", (post_id,))
@@ -428,25 +469,40 @@ def toggle_like(post_id):
 @app.route('/upload', methods=['POST'])
 @jwt_required()
 def upload_media():
-    """Handles uploading of media files (images, videos, audio)."""
+    """
+    Handles uploading of media files.
+    Uploads to Amazon S3 if configured, otherwise falls back to local storage.
+    """
     if 'file' not in request.files:
         return jsonify({"message": "No file part in the request"}), 400
     file = request.files['file']
     if file.filename == '':
         return jsonify({"message": "No file selected for uploading"}), 400
-    
+
     if file and allowed_file(file.filename):
         # Sanitize filename and make it unique to prevent overwrites
         import uuid
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
-        
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
-        
-        # Construct the URL for the uploaded file
-        file_url = f"{request.host_url}uploads/{unique_filename}"
-        
-        return jsonify({"message": "File uploaded successfully", "file_url": file_url}), 201
+
+        # --- S3 Upload Logic (for production on Vercel) ---
+        if s3_client:
+            try:
+                s3_client.upload_fileobj(
+                    file, S3_BUCKET, unique_filename,
+                    ExtraArgs={"ACL": "public-read", "ContentType": file.content_type}
+                )
+                file_url = f"https://{S3_BUCKET}.s3.amazonaws.com/{unique_filename}"
+                return jsonify({"message": "File uploaded successfully to S3", "file_url": file_url}), 201
+            except Exception as e:
+                print(f"S3 Upload Error: {e}")
+                return jsonify({"message": "Failed to upload to S3"}), 500
+
+        # --- Local Fallback Logic (for development) ---
+        else:
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
+            file_url = f"{request.host_url}uploads/{unique_filename}"
+            return jsonify({"message": "File uploaded locally (S3 not configured)", "file_url": file_url}), 201
     else:
         return jsonify({"message": "File type not allowed"}), 400
 
@@ -493,7 +549,78 @@ def get_posts_by_tag(tag_name):
     finally:
         if conn: conn.close()
 
+# ====================================================================
+# --- NEW: Categories Endpoint ---
+# ====================================================================
+@app.route('/categories', methods=['GET'])
+@cache.cached(key_prefix='all_categories')
+def get_categories():
+    """Fetches all available categories."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT id, name, slug FROM categories ORDER BY name ASC")
+        categories = [dict(cat) for cat in cur.fetchall()]
+        return jsonify(categories)
+    except Exception as e:
+        print(f"DB Error fetching categories: {e}")
+        return jsonify({'message': 'Failed to retrieve categories.'}), 500
+    finally:
+        if conn: conn.close()
 
+# ====================================================================
+# --- NEW: Category Posts Endpoint ---
+# ====================================================================
+@app.route('/posts/category/<category_slug>', methods=['GET'])
+@cache.cached(timeout=300, key_prefix='category_posts_')
+def get_posts_by_category(category_slug):
+    """Fetches all posts associated with a specific category slug."""
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        user_id = get_jwt_identity()
+    except:
+        user_id = None
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        cur.execute("SELECT name FROM categories WHERE slug = %s", (category_slug,))
+        category = cur.fetchone()
+        if not category:
+            return jsonify({"message": "Category not found"}), 404
+        category_name = category['name']
+
+        sql_query = """
+            SELECT 
+                p.*, u.username, cat.name as category_name, cat.slug as category_slug,
+                COALESCE(lc.like_count, 0) AS like_count,
+                EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) AS liked_by_user,
+                ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL) as tags,
+                ARRAY_AGG(DISTINCT pm.media_url) FILTER (WHERE pm.media_url IS NOT NULL) as media_urls
+            FROM posts p
+            JOIN users u ON p.user_id = u.id
+            JOIN categories cat ON p.category_id = cat.id
+            LEFT JOIN (SELECT post_id, COUNT(*) as like_count FROM post_likes GROUP BY post_id) lc ON p.id = lc.post_id
+            LEFT JOIN post_tags pt ON p.id = pt.post_id
+            LEFT JOIN tags t ON pt.tag_id = t.id
+            LEFT JOIN post_media pm ON p.id = pm.post_id
+            WHERE cat.slug = %s
+            GROUP BY p.id, u.username, lc.like_count, cat.name, cat.slug
+            ORDER BY p.created_at DESC;
+        """
+        cur.execute(sql_query, (user_id, category_slug))
+        posts = [dict(post) for post in cur.fetchall()]
+        
+        return jsonify({"posts": posts, "category_name": category_name})
+    except Exception as e:
+        print(f"DB Error fetching posts by category: {e}")
+        return jsonify({'message': 'Failed to retrieve posts.'}), 500
+    finally:
+        if conn: conn.close()
 
 # --- Main Execution ---
 if __name__ == '__main__':

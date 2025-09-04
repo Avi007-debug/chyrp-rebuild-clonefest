@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { LinkIcon, UserIcon, EditIcon, TrashIcon, MessageCircleIcon } from './Icons.jsx';
+import MediaRenderer from './MediaRenderer.jsx';
 import CommentSection from './CommentSection.jsx';
 import LikeButton from './LikeButton.jsx';
 
@@ -10,59 +11,25 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
 
     const renderPostContent = () => {
         switch (post.type) {
+            case 'photo':
+            case 'video':
+            case 'audio':
+                return (
+                    <div>
+                        <MediaRenderer post={post} />
+                        <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
+                    </div>
+                );
             case 'text':
+            default:
                 return (
                     <div className="p-6">
-                        <h2 className="text-xl font-bold mb-2">{post.title}</h2>
+                        <h2 className="text-xl font-bold mb-2 cursor-pointer hover:text-pink-600" onClick={() => setPage({ name: 'post-detail', postId: post.id })}>{post.title}</h2>
                         <div className="prose dark:prose-invert max-w-none">
                             <ReactMarkdown>{post.content}</ReactMarkdown>
                         </div>
                     </div>
                 );
-            case 'photo':
-                return (
-                    <div>
-                        <img src={post.image_url} alt={post.title} className="w-full h-auto object-cover"/>
-                        <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
-                    </div>
-                );
-            case 'video':
-                return (
-                    <div>
-                        <video controls className="w-full h-auto max-h-96 bg-black">
-                            <source src={post.image_url} type="video/mp4" />
-                            Your browser does not support the video tag.
-                        </video>
-                        <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
-                    </div>
-                );
-            case 'audio':
-                return (
-                    <div>
-                        <audio controls className="w-full mt-4">
-                            <source src={post.image_url} type="audio/mpeg" />
-                            Your browser does not support the audio element.
-                        </audio>
-                        <div className="p-6"><h2 className="text-xl font-bold">{post.title}</h2></div>
-                    </div>
-                );
-            case 'quote':
-                return (
-                    <div className="p-8 bg-pink-50 dark:bg-pink-900/20">
-                        <blockquote className="text-2xl font-serif italic text-center">“{post.quote_text}”</blockquote>
-                        <cite className="block text-right mt-4 not-italic">— {post.quote_author}</cite>
-                    </div>
-                );
-            case 'link':
-                return (
-                    <div className="p-6">
-                        <a href={post.url} target="_blank" rel="noopener noreferrer" className="flex items-center text-xl font-semibold text-pink-600 hover:underline">
-                            <LinkIcon />{post.title}
-                        </a>
-                    </div>
-                );
-            default:
-                return <div className="p-6 text-red-500">Unknown post type</div>;
         }
     };
 
@@ -70,29 +37,21 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
         <article className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-all duration-300 hover:shadow-xl border border-transparent hover:border-pink-500/30">
             {renderPostContent()}
 
-            {/* Tags section with oval and bold design */}
-            {post.tags && post.tags.length > 0 && (
-                <div className="px-6 py-2">
-                    <div className="flex flex-wrap gap-2">
-                        {post.tags.map((tag) => (
-                            <span
-                                key={tag}
-                                className="inline-flex items-center px-4 py-1 rounded-full bg-pink-100 dark:bg-pink-900/30 border border-pink-300 text-pink-700 dark:text-pink-200 text-sm font-bold shadow-md hover:bg-pink-200 transition-colors duration-150 cursor-pointer"
-                                style={{ boxShadow: '0 2px 8px rgba(60,64,67,.10)' }}
-                            >
-                                <span className="mr-1 text-pink-500 font-bold">#</span><span className="font-bold">{tag}</span>
-                            </span>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/*
-                How to add tags to a post:
-                - When creating or editing a post, include a 'tags' field (array of strings) in the post data sent to the backend.
-                - Example: { title: '...', content: '...', tags: ['react', 'flask', 'web'] }
-                - The backend will save and return these tags for each post.
-            */}
+            <div className="px-6 pt-2 pb-4 flex flex-wrap gap-2 items-center">
+                {post.category_name && (
+                    <button 
+                        onClick={() => setPage({ name: 'category', categorySlug: post.category_slug })}
+                        className="font-bold text-xs uppercase text-pink-600 bg-pink-100 dark:bg-pink-900/50 px-2 py-1 rounded hover:bg-pink-200 dark:hover:bg-pink-800/50 transition-colors"
+                    >
+                        {post.category_name}
+                    </button>
+                )}
+                {post.tags && post.tags.map((tag) => (
+                    <span key={tag} className="text-xs text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white cursor-pointer" onClick={() => setPage({ name: 'tag', tagName: tag })}>
+                        #{tag}
+                    </span>
+                ))}
+            </div>
 
             <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
                 <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 gap-4">

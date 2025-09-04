@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { UserIcon, TagIcon } from './Icons'; // Corrected import path
+import MediaRenderer from './MediaRenderer';
 import CommentSection from './CommentSection';
 import LikeButton from './LikeButton';
 
@@ -59,10 +60,29 @@ const PostDetailPage = ({ postId, setPage, currentUserId, token }) => {
                 {typeof post.view_count === 'number' && (
                     <span>{post.view_count} views</span>
                 )}
+                {post.category_name && (
+                    <button 
+                        onClick={() => setPage({ name: 'category', categorySlug: post.category_slug })}
+                        className="ml-4 bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded text-xs font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                    >
+                        {post.category_name}
+                    </button>
+                )}
             </div>
             
-            <div className="prose dark:prose-invert max-w-none mb-4 text-lg">
-                <ReactMarkdown>{post.content}</ReactMarkdown>
+            {/* Media Gallery for multiple files, or single media renderer */}
+            {post.media_urls && post.media_urls.length > 1 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {post.media_urls.map(url => (
+                        <MediaRenderer key={url} post={{...post, image_url: url}} />
+                    ))}
+                </div>
+            ) : (
+                <MediaRenderer post={post} />
+            )}
+
+            <div className="prose dark:prose-invert max-w-none mt-4 text-lg">
+                {post.type === 'text' && <ReactMarkdown>{post.content}</ReactMarkdown>}
             </div>
 
             {post.tags && post.tags.length > 0 && (
