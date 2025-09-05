@@ -143,6 +143,10 @@ def manage_tags(cur, post_id, tags_string):
                 (post_id, tag_id)
             )
 
+@app.route('/')
+def index():
+    return {"status": "ok", "message": "Chyrp Backend is running"}
+
 # =========================
 # === User Auth Routes ===
 # =========================
