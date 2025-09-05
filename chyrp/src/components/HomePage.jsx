@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import PostCard from './PostCard.jsx'; // Corrected the import path
+import PostCard from './PostCard.jsx';
 
 const API_URL = "http://localhost:5000/";
 
@@ -41,7 +41,9 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
         } else {
             setFilteredPosts(
                 posts.filter(post =>
-                    post.tags && post.tags.some(tag => tag.toLowerCase().includes(tagQuery.toLowerCase()))
+                    post.tags && post.tags.some(tag => 
+                        tag.toLowerCase().includes(tagQuery.toLowerCase())
+                    )
                 )
             );
         }
@@ -58,9 +60,11 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
                 return res.json();
             })
             .then(() => {
+                // Update the posts state instead of reloading the page
                 setPosts(currentPosts => currentPosts.filter(p => p.id !== postId));
-                // Reloading is a simple way to ensure UI consistency after delete
-                window.location.reload(); 
+                if (onPostDeleted) {
+                    onPostDeleted(postId);
+                }
             })
             .catch(err => alert(`Error: ${err.message || 'Could not delete post.'}`));
         }
@@ -71,33 +75,51 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
 
     return (
         <main className="max-w-3xl mx-auto p-6 space-y-8">
+            {/* Header with search only - Create Post button removed */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Recent Posts</h1>
+                {/* Create Post button removed from home page */}
+            </div>
+
             {/* Tag search bar */}
             <div className="mb-6 flex justify-center">
                 <input
                     type="text"
-                    className="w-full max-w-md px-4 py-2 border border-gray-300 rounded-3xl shadow-sm focus:outline-none focus:ring-2 focus:ring-pink-400 text-sm"
+                    className="w-full max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-3xl shadow-sm focus:outline-none focus:ring-2 focus:ring-pink-400 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     placeholder="Search posts by tag..."
                     value={tagQuery}
                     onChange={e => setTagQuery(e.target.value)}
                 />
             </div>
-            {filteredPosts.length === 0 ? (
-                <div className="text-center text-gray-500">No posts found for this tag.</div>
+
+            {/* Post counter */}
+            {tagQuery && (
+                <div className="text-center text-gray-500 dark:text-gray-400">
+                    Found {filteredPosts.length} post{filteredPosts.length !== 1 ? 's' : ''} with tag "{tagQuery}"
+                </div>
+            )}
+
+            {/* Posts list */}
+            {filteredPosts.length === 0 && !loading ? (
+                <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {tagQuery ? `No posts found for tag "${tagQuery}"` : 'No posts yet. Be the first to post!'}
+                </div>
             ) : (
-                filteredPosts.map(post => (
-                    <PostCard 
-                        key={post.id} 
-                        post={post} 
-                        currentUserId={currentUserId} 
-                        setPage={setPage}
-                        onDelete={handleDeletePost}
-                        token={token}
-                    />
-                ))
+                <div className="space-y-6">
+                    {filteredPosts.map(post => (
+                        <PostCard 
+                            key={post.id} 
+                            post={post} 
+                            currentUserId={currentUserId} 
+                            setPage={setPage}
+                            onDelete={handleDeletePost}
+                            token={token}
+                        />
+                    ))}
+                </div>
             )}
         </main>
     );
 };
 
 export default HomePage;
-

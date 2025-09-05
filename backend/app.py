@@ -18,7 +18,7 @@ import string
 app = Flask(__name__, static_folder='uploads', static_url_path='/uploads')
 CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 bcrypt = Bcrypt(app)
-app.config["JWT_SECRET_KEY"] = "your-super-secret-key-for-development" 
+app.config["JWT_SECRET_KEY"] = "your-super-secret-key-for-development"
 jwt = JWTManager(app)
 
 # --- Caching Configuration ---
@@ -62,23 +62,70 @@ def allowed_file(filename):
 
 # --- Custom JWT Error Handlers ---
 @jwt.unauthorized_loader
-def unauthorized_callback(callback): return jsonify({"message": "Missing or invalid Authorization Header"}), 401
+def unauthorized_callback(callback):
+    return jsonify({"message": "Missing or invalid Authorization Header"}), 401
+
 @jwt.invalid_token_loader
-def invalid_token_callback(error): return jsonify({"message": f"Invalid token: {error}"}), 422
+def invalid_token_callback(error):
+    return jsonify({"message": f"Invalid token: {error}"}), 422
+
 @jwt.expired_token_loader
-def expired_token_callback(jwt_header, jwt_payload): return jsonify({"message": "Token has expired"}), 401
+def expired_token_callback(jwt_header, jwt_payload):
+    return jsonify({"message": "Token has expired"}), 401
 
 # --- Database Connection ---
 DB_HOST = "localhost"
 DB_NAME = "blog"
 DB_USER = "p1"
 DB_PASS = "root"
-def get_db_connection():
-    return psycopg2.connect(host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASS)
 
-# --- Helper Function for Tag Management ---
+def get_db_connection():
+    conn = psycopg2.connect(
+        host=DB_HOST, database=DB_NAME,
+        user=DB_USER, password=DB_PASS
+    )
+    
+    # Create tables if they don't exist
+    with conn.cursor() as cur:
+        # Create posts table with quote and link support
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS posts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                type VARCHAR(20) NOT NULL,
+                title TEXT,
+                content TEXT,
+                link_url TEXT,
+                attribution TEXT,
+                license TEXT,
+                image_url TEXT,
+                category_id INTEGER,
+                view_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT posts_type_check CHECK (type IN ('text', 'photo', 'video', 'audio', 'quote', 'link'))
+            )
+        """)
+        
+        # Update existing table to add link_url if it doesn't exist
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'posts' AND column_name = 'link_url'
+                ) THEN
+                    ALTER TABLE posts ADD COLUMN link_url TEXT;
+                END IF;
+            END $$;
+        """)
+        
+        conn.commit()
+    
+    return conn
+
+# --- Helper: Manage Tags ---
 def manage_tags(cur, post_id, tags_string):
-    """Handles finding/creating tags and linking them to a post."""
     if tags_string:
         tag_names = [tag.strip().lower() for tag in tags_string.split(',') if tag.strip()]
         tag_ids = []
@@ -90,19 +137,22 @@ def manage_tags(cur, post_id, tags_string):
             else:
                 cur.execute("INSERT INTO tags (name) VALUES (%s) RETURNING id", (name,))
                 tag_ids.append(cur.fetchone()[0])
-        
-        # Link tags to the post
         for tag_id in tag_ids:
-            cur.execute("INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (post_id, tag_id))
+            cur.execute(
+                "INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (post_id, tag_id)
+            )
 
-# --- API Endpoints ---
+# =========================
+# === User Auth Routes ===
+# =========================
 
-# === User Authentication (Unchanged) ===
 @app.route('/register', methods=['POST'])
 def register():
-    # ... code is unchanged ...
     data = request.get_json()
-    if not all(key in data for key in ['username', 'email', 'password']): return jsonify({"message": "Missing required fields"}), 400
+    if not all(key in data for key in ['username', 'email', 'password']):
+        return jsonify({"message": "Missing required fields"}), 400
+
     username, email, password = data['username'], data['email'], data['password']
     password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
     conn = None
@@ -110,8 +160,10 @@ def register():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT * FROM users WHERE username = %s OR email = %s", (username, email))
-        if cur.fetchone(): return jsonify({"message": "Username or email already exists"}), 409
-        cur.execute("INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s)", (username, email, password_hash))
+        if cur.fetchone():
+            return jsonify({"message": "Username or email already exists"}), 409
+        cur.execute("INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s)",
+                      (username, email, password_hash))
         conn.commit()
     except Exception as e:
         print(f"DB Error: {e}")
@@ -122,9 +174,10 @@ def register():
 
 @app.route('/login', methods=['POST'])
 def login():
-    # ... code is unchanged ...
     data = request.get_json()
-    if not all(key in data for key in ['username', 'password']): return jsonify({"message": "Missing username or password"}), 400
+    if not all(key in data for key in ['username', 'password']):
+        return jsonify({"message": "Missing username or password"}), 400
+
     username, password = data['username'], data['password']
     conn = None
     try:
@@ -142,7 +195,9 @@ def login():
     finally:
         if conn: conn.close()
 
-# === Blog Post Endpoints ===
+# =========================
+# === Posts Routes ========
+# =========================
 
 @app.route('/posts', methods=['GET'])
 @cache.cached(key_prefix='all_posts')
@@ -301,7 +356,6 @@ def create_post():
     invalidate_post_caches()  # Invalidate relevant caches
     user_id = int(get_jwt_identity())
     data = request.get_json()
-    if not data.get('title'): return jsonify({"message": "Title is required"}), 400
     
     post_type = data.get('type', 'text')
     title = data.get('title')
@@ -309,6 +363,15 @@ def create_post():
     media_urls = data.get('media_urls', []) # Get the list of media URLs
     tags_string = data.get('tags', '') # Get tags as a comma-separated string
     category_id = data.get('category_id') # Get category ID
+    link_url = data.get('link_url')  # Get link URL for link type posts
+    
+    # Validation
+    if post_type != 'quote' and not title:
+        return jsonify({"message": "Title is required for this post type"}), 400
+    if post_type == 'link' and not link_url:
+        return jsonify({"message": "Link URL is required for link type posts"}), 400
+    if post_type == 'quote' and not content:
+        return jsonify({"message": "Content is required for quote type posts"}), 400
     
     conn = None
     try:
@@ -317,13 +380,12 @@ def create_post():
         attribution = data.get('attribution')
         license = data.get('license')
 
-
         # Use the first media URL as the primary 'image_url' for thumbnails/previews
         primary_media_url = media_urls[0] if media_urls else None
 
         cur.execute(
-            "INSERT INTO posts (user_id, type, title, content, attribution, license, image_url, category_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (user_id, post_type, title, content, attribution, license, primary_media_url, category_id)
+            "INSERT INTO posts (user_id, type, title, content, attribution, license, image_url, category_id, link_url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, post_type, title, content, attribution, license, primary_media_url, category_id, link_url)
         )
         post_id = cur.fetchone()[0]
         
@@ -345,8 +407,11 @@ def create_post():
     except (Exception, psycopg2.DatabaseError) as error:
         print(f"DATABASE ERROR creating post: {error}")
         return jsonify({"message": "Database error"}), 500
+
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
+
 
 @app.route('/posts/<int:post_id>', methods=['PUT'])
 @jwt_required()
@@ -355,16 +420,23 @@ def update_post(post_id):
     current_user_id = int(get_jwt_identity())
     data = request.get_json()
 
-    if not data.get('title'):
-        return jsonify({"message": "Title is required"}), 400
-
     # Extract fields from request
     title = data.get('title')
     content = data.get('content')
+    post_type = data.get('type') # Type should be sent on update
     tags_string = data.get('tags', '')
     category_id = data.get('category_id')
     attribution = data.get('attribution')
     license = data.get('license')
+    link_url = data.get('link_url')
+
+    # Validation
+    if post_type != 'quote' and not title:
+        return jsonify({"message": "Title is required for this post type"}), 400
+    if post_type == 'link' and not link_url:
+        return jsonify({"message": "Link URL is required for link posts"}), 400
+    if post_type == 'quote' and not content:
+        return jsonify({"message": "Content is required for quotes"}), 400
 
     conn = None
     try:
@@ -387,10 +459,12 @@ def update_post(post_id):
                 content = %s,
                 attribution = %s,
                 license = %s,
-                category_id = %s
+                category_id = %s,
+                link_url = %s,
+                type = %s
             WHERE id = %s
             """,
-            (title, content, attribution, license, category_id, post_id)
+            (title, content, attribution, license, category_id, link_url, post_type, post_id)
         )
 
         # Update tags (clear + add new ones)
@@ -412,8 +486,7 @@ def update_post(post_id):
 @app.route('/posts/<int:post_id>', methods=['DELETE'])
 @jwt_required()
 def delete_post(post_id):
-    invalidate_post_caches(post_id)  # Invalidate relevant caches
-    # ... (code is unchanged) ...
+    invalidate_post_caches(post_id)
     current_user_id = int(get_jwt_identity())
     conn = None
     try:
@@ -421,18 +494,67 @@ def delete_post(post_id):
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute("SELECT user_id FROM posts WHERE id = %s", (post_id,))
         post = cur.fetchone()
-        if not post: return jsonify({"message": "Post not found"}), 404
-        if post['user_id'] != current_user_id: return jsonify({"message": "Forbidden"}), 403
+        if not post:
+            return jsonify({"message": "Post not found"}), 404
+        if post['user_id'] != current_user_id:
+            return jsonify({"message": "Forbidden"}), 403
+        
+        # Deletion logic
         cur.execute("DELETE FROM posts WHERE id = %s", (post_id,))
         conn.commit()
         return jsonify({"message": "Post deleted successfully"})
     except Exception as e:
-        print(f"DB Error: {e}")
+        print(f"DB Error on delete: {e}")
         return jsonify({"message": "Database error"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+# --- Tag Filter Endpoint ---
+@app.route('/posts/tag/<tag_name>', methods=['GET'])
+@cache.cached(timeout=300, key_prefix='tag_posts_')  # Cache tagged posts for 5 minutes
+def get_posts_by_tag(tag_name):
+    """Fetches all posts associated with a specific tag."""
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        user_id = get_jwt_identity()
+    except:
+        user_id = None
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        sql_query = """
+            SELECT 
+                p.*, u.username,
+                COALESCE(lc.like_count, 0) AS like_count,
+                EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) AS liked_by_user,
+                ARRAY_AGG(t.name) FILTER (WHERE t.name IS NOT NULL) as tags
+            FROM posts p
+            JOIN users u ON p.user_id = u.id
+            LEFT JOIN (SELECT post_id, COUNT(*) as like_count FROM post_likes GROUP BY post_id) lc 
+                ON p.id = lc.post_id
+            JOIN post_tags pt ON p.id = pt.post_id
+            JOIN tags t ON pt.tag_id = t.id
+            WHERE t.name = %s
+            GROUP BY p.id, u.username, lc.like_count
+            ORDER BY p.created_at DESC;
+        """
+        cur.execute(sql_query, (user_id, tag_name))
+        posts = [dict(post) for post in cur.fetchall()]
+        return jsonify(posts)
+    except Exception as e:
+        print(f"DB Error: {e}")
+        return jsonify({'message': 'Failed to retrieve posts.'}), 500
     finally:
         if conn: conn.close()
 
-# === Comment Endpoints (Unchanged) ===
+# ================================
+# === Likes & Comments Routes ===
+# ================================
+
 @app.route('/posts/<int:post_id>/comments', methods=['GET'])
 @cache.cached(timeout=300, key_prefix='post_comments_')  # Cache comments for 5 minutes
 def get_comments(post_id):
@@ -440,7 +562,11 @@ def get_comments(post_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("SELECT c.*, u.username FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = %s ORDER BY c.created_at ASC", (post_id,))
+        cur.execute(
+            "SELECT c.*, u.username FROM comments c JOIN users u ON c.user_id = u.id "
+            "WHERE c.post_id = %s ORDER BY c.created_at ASC",
+            (post_id,)
+        )
         comments = [dict(comment) for comment in cur.fetchall()]
         return jsonify(comments)
     except Exception as e:
@@ -452,23 +578,34 @@ def get_comments(post_id):
 @app.route('/posts/<int:post_id>/comments', methods=['POST'])
 @jwt_required()
 def add_comment(post_id):
-    cache.delete(f'view//posts/{post_id}') # Invalidate cache for this specific post
-    cache.delete('all_posts') # Invalidate the cache for the list of all posts
-    # ... (code is unchanged) ...
+    invalidate_post_caches(post_id)
     user_id = int(get_jwt_identity())
     data = request.get_json()
-    if not data or not data.get('content'): return jsonify({"message": "Comment content is required"}), 400
+    if not data or not data.get('content'):
+        return jsonify({"message": "Comment content is required"}), 400
+
     content = data['content']
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s) RETURNING id, created_at", (post_id, user_id, content))
+        cur.execute(
+            "INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s) RETURNING id, created_at",
+            (post_id, user_id, content)
+        )
         new_comment_data = cur.fetchone()
         conn.commit()
+
         cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
         user = cur.fetchone()
-        full_comment = {'id': new_comment_data['id'], 'post_id': post_id, 'user_id': user_id, 'content': content, 'username': user['username'], 'created_at': new_comment_data['created_at']}
+        full_comment = {
+            'id': new_comment_data['id'],
+            'post_id': post_id,
+            'user_id': user_id,
+            'content': content,
+            'username': user['username'],
+            'created_at': new_comment_data['created_at']
+        }
         return jsonify(full_comment), 201
     except Exception as e:
         print(f"DB Error: {e}")
@@ -476,12 +613,10 @@ def add_comment(post_id):
     finally:
         if conn: conn.close()
 
-# === Like Endpoint (Unchanged) ===
 @app.route('/posts/<int:post_id>/like', methods=['POST'])
 @jwt_required()
 def toggle_like(post_id):
     invalidate_post_caches(post_id)  # Invalidate relevant caches
-    # ... (code is unchanged) ...
     user_id = int(get_jwt_identity())
     conn = None
     try:
@@ -496,6 +631,7 @@ def toggle_like(post_id):
             cur.execute("INSERT INTO post_likes (user_id, post_id) VALUES (%s, %s)", (user_id, post_id))
             liked = True
         conn.commit()
+
         cur.execute("SELECT COUNT(*) FROM post_likes WHERE post_id = %s", (post_id,))
         like_count = cur.fetchone()[0]
         return jsonify({"liked": liked, "like_count": like_count})
@@ -506,7 +642,7 @@ def toggle_like(post_id):
         if conn: conn.close()
 
 # ====================================================================
-# --- NEW: Media Upload Endpoints ---
+# --- Media Upload Endpoints ---
 # ====================================================================
 
 @app.route('/upload', methods=['POST'])
@@ -550,50 +686,7 @@ def upload_media():
         return jsonify({"message": "File type not allowed"}), 400
 
 # ====================================================================
-# --- NEW: Tag Endpoint ---
-# ====================================================================
-@app.route('/posts/tag/<tag_name>', methods=['GET'])
-@cache.cached(timeout=300, key_prefix='tag_posts_')  # Cache tagged posts for 5 minutes
-def get_posts_by_tag(tag_name):
-    """Fetches all posts associated with a specific tag."""
-    user_id = None
-    try:
-        verify_jwt_in_request(optional=True)
-        user_id = get_jwt_identity()
-    except:
-        user_id = None
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        # This query is similar to get_posts but filters by a specific tag name
-        sql_query = """
-            SELECT 
-                p.*, u.username,
-                COALESCE(lc.like_count, 0) AS like_count,
-                EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = %s) AS liked_by_user,
-                ARRAY_AGG(t.name) FILTER (WHERE t.name IS NOT NULL) as tags
-            FROM posts p
-            JOIN users u ON p.user_id = u.id
-            LEFT JOIN (SELECT post_id, COUNT(*) as like_count FROM post_likes GROUP BY post_id) lc ON p.id = lc.post_id
-            JOIN post_tags pt ON p.id = pt.post_id
-            JOIN tags t ON pt.tag_id = t.id
-            WHERE t.name = %s
-            GROUP BY p.id, u.username, lc.like_count
-            ORDER BY p.created_at DESC;
-        """
-        cur.execute(sql_query, (user_id, tag_name))
-        posts = [dict(post) for post in cur.fetchall()]
-        return jsonify(posts)
-    except Exception as e:
-        print(f"DB Error: {e}")
-        return jsonify({'message': 'Failed to retrieve posts.'}), 500
-    finally:
-        if conn: conn.close()
-
-# ====================================================================
-# --- NEW: Categories Endpoint ---
+# --- Categories Endpoint ---
 # ====================================================================
 @app.route('/categories', methods=['GET'])
 @cache.cached(key_prefix='all_categories')
@@ -613,7 +706,7 @@ def get_categories():
         if conn: conn.close()
 
 # ====================================================================
-# --- NEW: Category Posts Endpoint ---
+# --- Category Posts Endpoint ---
 # ====================================================================
 @app.route('/posts/category/<category_slug>', methods=['GET'])
 @cache.cached(timeout=300, key_prefix='category_posts_')
@@ -666,7 +759,7 @@ def get_posts_by_category(category_slug):
         if conn: conn.close()
 
 # ====================================================================
-# --- NEW: Webmention Endpoints ---
+# --- Webmention Endpoints ---
 # ====================================================================
 @app.route('/webmention', methods=['POST'])
 def receive_webmention():
@@ -691,28 +784,22 @@ def receive_webmention():
     content = data.get('content')
     
     # Extract post ID from target URL
-    # Assuming target URL format: http://yourdomain.com/posts/{post_id}
     try:
-        post_id = int(target_url.split('/posts/')[-1])
-        print(f"Extracted post_id: {post_id}")  # Debug print
-    except (ValueError, IndexError) as e:
-        print(f"Error extracting post_id: {e}")  # Debug print
-        return jsonify({"message": "Invalid target URL"}), 400
+        # This logic assumes a URL structure like /posts/123 at the end
+        path_parts = target_url.split('/')
+        post_id = int(path_parts[-1] or path_parts[-2])
+    except (ValueError, IndexError):
+        return jsonify({"message": "Invalid target URL format"}), 400
     
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Check if the post exists
         cur.execute("SELECT id FROM posts WHERE id = %s", (post_id,))
         post = cur.fetchone()
-        print(f"Found post: {post}")  # Debug print
+        if not post: return jsonify({"message": "Target post not found"}), 404
         
-        if not post:
-            return jsonify({"message": "Target post not found"}), 404
-        
-        # Store the webmention
         insert_query = """
             INSERT INTO webmentions 
             (post_id, source_url, target_url, mention_type, author_name, author_url, author_photo, content, verified)
@@ -720,27 +807,19 @@ def receive_webmention():
             RETURNING id
         """
         values = (post_id, source_url, target_url, mention_type, author_name, author_url, author_photo, content)
-        print(f"Inserting webmention with values: {values}")  # Debug print
-        
         cur.execute(insert_query, values)
         webmention_id = cur.fetchone()[0]
         conn.commit()
-        print(f"Inserted webmention with id: {webmention_id}")  # Debug print
         
-        # Invalidate relevant caches
         invalidate_post_caches(post_id)
         
-        return jsonify({
-            "message": "Webmention received successfully",
-            "id": webmention_id
-        }), 201
+        return jsonify({"message": "Webmention received successfully", "id": webmention_id}), 201
         
     except Exception as e:
         print(f"Error processing webmention: {e}")
         return jsonify({"message": "Error processing webmention"}), 500
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 @app.route('/posts/<int:post_id>/webmentions', methods=['GET'])
 def get_webmentions(post_id):
@@ -763,19 +842,14 @@ def get_webmentions(post_id):
         print(f"Error fetching webmentions: {e}")
         return jsonify({"message": "Error fetching webmentions"}), 500
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 # ====================================================================
-# --- NEW: Sitemap Endpoint ---
+# --- Sitemap Endpoint ---
 # ====================================================================
 @app.route('/sitemap.xml')
 def sitemap():
     """Generates a sitemap.xml file for SEO."""
-    
-    # NOTE: For this to be effective, your frontend must use a URL routing library
-    # (like React Router) so that pages like /posts/123 are actual navigable URLs.
-    # This URL should be your public frontend domain, not the backend's.
     base_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     conn = None
@@ -783,20 +857,16 @@ def sitemap():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Static pages (just the home page for now)
         static_urls = [{'loc': base_url, 'lastmod': datetime.now().strftime('%Y-%m-%d')}]
 
-        # Post pages
         cur.execute("SELECT id, updated_at FROM posts ORDER BY updated_at DESC")
         posts = cur.fetchall()
         post_urls = [{'loc': f"{base_url}/posts/{post['id']}", 'lastmod': post['updated_at'].strftime('%Y-%m-%d')} for post in posts]
 
-        # Category pages
         cur.execute("SELECT slug FROM categories")
         categories = cur.fetchall()
         category_urls = [{'loc': f"{base_url}/category/{cat['slug']}", 'lastmod': datetime.now().strftime('%Y-%m-%d')} for cat in categories]
 
-        # Tag pages
         cur.execute("SELECT name FROM tags")
         tags = cur.fetchall()
         tag_urls = [{'loc': f"{base_url}/tag/{tag['name']}", 'lastmod': datetime.now().strftime('%Y-%m-%d')} for tag in tags]
@@ -820,6 +890,9 @@ def sitemap():
     finally:
         if conn: conn.close()
 
+# ====================================================================
+# --- Captcha Endpoints ---
+# ====================================================================
 captchas = {}
 
 def generate_token(length=12):
@@ -852,13 +925,14 @@ def verify_captcha():
     if not token or token not in captchas:
         return jsonify({"success": False, "error": "Invalid or expired captcha"}), 400
 
-    correct_answer = captchas[token]
-    del captchas[token]  # One-time use
+    correct_answer = captchas.pop(token) # Pop to ensure one-time use
 
     if user_answer == correct_answer:
         return jsonify({"success": True, "message": "Captcha passed"})
     else:
         return jsonify({"success": False, "error": "Incorrect answer"}), 400
+
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
