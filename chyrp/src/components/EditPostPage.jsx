@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://chyrp-rebuild-clonefest.onrender.com";
+
 
 const EditPostPage = ({ token, setPage, postId }) => {
   // --- STATE MANAGEMENT ---

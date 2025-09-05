@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { UserIcon } from './Icons.jsx';
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://chyrp-rebuild-clonefest.onrender.com";
+
 
 // --- Individual Comment Component ---
 const Comment = ({ comment }) => {

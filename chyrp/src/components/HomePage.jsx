@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import PostCard from './PostCard.jsx';
 
-const API_URL = "http://localhost:5000/";
+const API_URL = "https://chyrp-rebuild-clonefest.onrender.com";
+
 
 const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
     const [posts, setPosts] = useState([]);

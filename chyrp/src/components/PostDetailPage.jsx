@@ -9,7 +9,8 @@ import WebmentionList from './WebmentionList.jsx';
 import LikeButton from './LikeButton.jsx';
 import { UserIcon, TagIcon, ExternalLinkIcon } from './Icons.jsx';
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://chyrp-rebuild-clonefest.onrender.com";
+
 
 const PostDetailPage = ({ postId, setPage, currentUserId, token }) => {
   const [post, setPost] = useState(null);

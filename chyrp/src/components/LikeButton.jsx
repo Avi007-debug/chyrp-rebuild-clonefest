@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { HeartIcon } from './Icons.jsx';
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://chyrp-rebuild-clonefest.onrender.com";
+
 
 const LikeButton = ({ postId, initialLikeCount, initialLikedByUser, token }) => {
     // State to manage the like count and the user's like status
