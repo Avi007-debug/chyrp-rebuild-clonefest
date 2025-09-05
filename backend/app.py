@@ -73,21 +73,29 @@ def invalid_token_callback(error):
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"message": "Token has expired"}), 401
 
+import os
+import psycopg2
+
 # --- Database Connection ---
-DB_HOST = "localhost"
-DB_NAME = "blog"
-DB_USER = "p1"
-DB_PASS = "root"
+DB_URL = os.getenv("DATABASE_URL")  # Uses env variable if available
 
 def get_db_connection():
-    conn = psycopg2.connect(
-        host=DB_HOST, database=DB_NAME,
-        user=DB_USER, password=DB_PASS
-    )
+    if DB_URL:
+        # Connect using the provided DATABASE_URL
+        conn = psycopg2.connect(DB_URL)
+    else:
+        # Fallback for local development
+        DB_HOST = "localhost"
+        DB_NAME = "blog"
+        DB_USER = "p1"
+        DB_PASS = "root"
+        conn = psycopg2.connect(
+            host=DB_HOST, database=DB_NAME,
+            user=DB_USER, password=DB_PASS
+        )
     
     # Create tables if they don't exist
     with conn.cursor() as cur:
-        # Create posts table with quote and link support
         cur.execute("""
             CREATE TABLE IF NOT EXISTS posts (
                 id SERIAL PRIMARY KEY,
@@ -107,7 +115,6 @@ def get_db_connection():
             )
         """)
         
-        # Update existing table to add link_url if it doesn't exist
         cur.execute("""
             DO $$
             BEGIN
@@ -123,6 +130,7 @@ def get_db_connection():
         conn.commit()
     
     return conn
+
 
 # --- Helper: Manage Tags ---
 def manage_tags(cur, post_id, tags_string):
