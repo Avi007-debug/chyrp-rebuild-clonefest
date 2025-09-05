@@ -23,3 +23,9 @@ export const HeartIcon = ({ filled = false }) => (
         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
     </svg>
 );
+export const ExternalLinkIcon = ({ className = "h-3 w-3" }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 015.656 5.656l-8.485 8.485a4 4 0 01-5.656-5.656l8.485-8.485z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 9l6 6" />
+    </svg>
+);
