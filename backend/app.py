@@ -663,7 +663,6 @@ SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET_NAME", "uploads")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-
 @app.route('/upload', methods=['POST'])
 @jwt_required()
 def upload_media():
@@ -678,7 +677,6 @@ def upload_media():
         return jsonify({"message": "No file selected for uploading"}), 400
 
     if file and allowed_file(file.filename):
-        # Sanitize filename and make it unique to prevent overwrites
         import uuid
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
@@ -687,21 +685,26 @@ def upload_media():
         if supabase:
             try:
                 file_data = file.read()
-                res = supabase.storage.from_(SUPABASE_BUCKET).upload(unique_filename, file_data)
-                if res.get('error'):
-                    raise Exception(res['error'])
+                upload_response = supabase.storage.from_(SUPABASE_BUCKET).upload(unique_filename, file_data)
 
-                file_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)['publicUrl']
+                # Check for upload error
+                if upload_response.error:
+                    raise Exception(upload_response.error.message)
+
+                # Construct public URL manually
+                file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{unique_filename}"
                 return jsonify({"message": "File uploaded successfully to Supabase", "file_url": file_url}), 201
+
             except Exception as e:
                 print(f"Supabase Upload Error: {e}")
-                # Fallback to local storage if Supabase fails
+                # Will fallback to local storage below
 
-        # --- Local Fallback Logic (for development or fallback) ---
-        file.seek(0)  # Reset file pointer after reading
+        # --- Local Fallback Logic ---
+        file.seek(0)  # Reset file pointer
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
         file_url = f"{request.host_url}uploads/{unique_filename}"
         return jsonify({"message": "File uploaded locally (Supabase failed or not configured)", "file_url": file_url}), 201
+
     else:
         return jsonify({"message": "File type not allowed"}), 400
 
