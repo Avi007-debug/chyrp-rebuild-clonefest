@@ -1,15 +1,25 @@
 import React from 'react';
-import ReactMarkdown from 'react-markdown';
 
-const MediaRenderer = ({ post }) => {
+const MediaRenderer = ({ post, onClick }) => {
     // This component decides how to render a post's content based on its type.
     switch (post.type) {
         case 'photo':
-            return <img src={post.image_url} alt={post.title} className="w-full h-auto object-cover" />;
+            return (
+                <img 
+                    src={post.image_url} 
+                    alt={post.title} 
+                    className="w-full h-auto object-cover cursor-pointer rounded-lg" 
+                    onClick={onClick} 
+                />
+            );
         
         case 'video':
             return (
-                <video controls className="w-full rounded-lg mt-2 bg-black">
+                <video 
+                    controls 
+                    className="w-full rounded-lg mt-2 bg-black cursor-pointer" 
+                    onClick={onClick}
+                >
                     <source src={post.image_url} />
                     Your browser does not support the video tag.
                 </video>

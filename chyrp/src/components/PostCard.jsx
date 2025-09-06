@@ -4,14 +4,25 @@ import MediaRenderer from './MediaRenderer.jsx';
 import CommentSection from './CommentSection.jsx';
 import LikeButton from './LikeButton.jsx';
 import MarkdownRenderer from './MarkdownRenderer.jsx';
+import Lightbox from './Lightbox.jsx';
+import './PostCard.css'; // Import the CSS file
 
 const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
     const isAuthor = currentUserId && post.user_id === currentUserId;
     const [showComments, setShowComments] = useState(false);
     const [showLoginPrompt, setShowLoginPrompt] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+    const [lightboxMedia, setLightboxMedia] = useState({ url: '', type: '' });
 
     const toggleReadMore = () => setIsExpanded(!isExpanded);
+
+    const openLightbox = (url, type) => {
+        setLightboxMedia({ url, type });
+        setLightboxOpen(true);
+    };
+
+    const closeLightbox = () => setLightboxOpen(false);
 
     const getDomainFromUrl = (url) => {
         try {
@@ -40,16 +51,35 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
         setShowComments(!showComments);
     };
 
+    // Function to extract images from post content
+    const extractImages = (content) => {
+        if (!content) return [];
+        const imgRegex = /<img[^>]+src="([^">]+)"/g;
+        const images = [];
+        let match;
+        
+        while ((match = imgRegex.exec(content)) !== null) {
+            images.push(match[1]);
+        }
+        
+        return images;
+    };
+
     const renderPostContent = () => {
+        const contentImages = extractImages(post.content);
+        
         switch (post.type) {
             case 'photo':
             case 'video':
             case 'audio':
                 return (
                     <div>
-                        <MediaRenderer post={post} />
-                        <div className="p-6">
-                            <h2 className="text-xl font-bold cursor-pointer hover:text-pink-600" onClick={handleViewPost}>{post.title}</h2>
+                        <MediaRenderer 
+                            post={post} 
+                            onClick={() => openLightbox(post.media_url, post.type)} 
+                        />
+                        <div className="post-content">
+                            <h2 className="post-title" onClick={handleViewPost}>{post.title}</h2>
                             {post.content && (
                                 <div className="prose dark:prose-invert max-w-none mt-2">
                                     {post.content.length > 300 && !isExpanded ? (
@@ -57,7 +87,7 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                                             <MarkdownRenderer content={post.content.slice(0, 300) + "..."} />
                                             <button
                                                 onClick={toggleReadMore}
-                                                className="text-pink-600 font-bold ml-1 hover:underline"
+                                                className="read-more-button"
                                             >
                                                 Read More
                                             </button>
@@ -68,7 +98,7 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                                             {post.content.length > 300 && (
                                                 <button
                                                     onClick={toggleReadMore}
-                                                    className="text-pink-600 font-bold ml-1 hover:underline"
+                                                    className="read-more-button"
                                                 >
                                                     Read Less
                                                 </button>
@@ -85,31 +115,31 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                 const quoteText = contentParts[0] || '';
                 const quoteAuthor = contentParts[1] || 'Unknown';
                 return (
-                    <div className="p-8 bg-pink-50 dark:bg-pink-900/20 cursor-pointer" onClick={handleViewPost}>
+                    <div className="quote-post" onClick={handleViewPost}>
                         {post.title && <h2 className="text-xl font-bold mb-4 text-center">{post.title}</h2>}
-                        <blockquote className="text-2xl font-serif italic text-center">"{quoteText}"</blockquote>
-                        <cite className="block text-right mt-4 not-italic">— {quoteAuthor}</cite>
+                        <blockquote className="quote-text">"{quoteText}"</blockquote>
+                        <cite className="quote-author">— {quoteAuthor}</cite>
                     </div>
                 );
             case 'link':
                 return (
-                    <div className="p-6">
+                    <div className="link-post">
                         <a 
                             href={post.link_url} 
                             target="_blank" 
                             rel="noopener noreferrer" 
-                            className="block p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-200"
+                            className="link-container"
                         >
                             <div className="flex items-start gap-3">
-                                <div className="flex-shrink-0 mt-1 text-pink-500"><LinkIcon /></div>
-                                <div className="flex-1 min-w-0">
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 truncate">{post.title}</h3>
+                                <div className="link-icon"><LinkIcon /></div>
+                                <div className="link-content">
+                                    <h3 className="link-title">{post.title}</h3>
                                     {post.content && (
-                                        <p className="text-gray-600 dark:text-gray-300 text-sm mb-2 line-clamp-2">{post.content}</p>
+                                        <p className="link-description">{post.content}</p>
                                     )}
-                                    <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 gap-1">
+                                    <div className="link-domain">
                                         <span className="truncate">{getDomainFromUrl(post.link_url)}</span>
-                                        <ExternalLinkIcon className="w-3 h-3 inline-block text-gray-400 dark:text-gray-300" />
+                                        <ExternalLinkIcon className="external-link-icon" />
                                     </div>
                                 </div>
                             </div>
@@ -119,15 +149,15 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
             case 'text':
             default:
                 return (
-                    <div className="p-6">
-                        <h2 className="text-xl font-bold mb-2 cursor-pointer hover:text-pink-600" onClick={handleViewPost}>{post.title}</h2>
+                    <div className="post-content">
+                        <h2 className="post-title" onClick={handleViewPost}>{post.title}</h2>
                         <div className="prose dark:prose-invert max-w-none">
-                            {post.content.length > 300 && !isExpanded ? (
+                            {post.content && post.content.length > 300 && !isExpanded ? (
                                 <>
                                     <MarkdownRenderer content={post.content.slice(0, 300) + "..."} />
                                     <button
                                         onClick={toggleReadMore}
-                                        className="text-pink-600 font-bold ml-1 hover:underline"
+                                        className="read-more-button"
                                     >
                                         Read More
                                     </button>
@@ -135,15 +165,30 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                             ) : (
                                 <>
                                     <MarkdownRenderer content={post.content} />
-                                    {post.content.length > 300 && (
+                                    {post.content && post.content.length > 300 && (
                                         <button
                                             onClick={toggleReadMore}
-                                            className="text-pink-600 font-bold ml-1 hover:underline"
+                                            className="read-more-button"
                                         >
                                             Read Less
                                         </button>
                                     )}
                                 </>
+                            )}
+                            
+                            {/* Display images from content with lightbox functionality */}
+                            {contentImages.length > 0 && (
+                                <div className="post-images">
+                                    {contentImages.map((imgSrc, index) => (
+                                        <img
+                                            key={index}
+                                            src={imgSrc}
+                                            alt={`Post content image ${index + 1}`}
+                                            className="post-image"
+                                            onClick={() => openLightbox(imgSrc, 'image')}
+                                        />
+                                    ))}
+                                </div>
                             )}
                         </div>
                     </div>
@@ -152,14 +197,14 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
     };
 
     return (
-        <article className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-all duration-300 hover:shadow-xl border border-transparent hover:border-pink-500/30">
+        <article className="post-card">
             {renderPostContent()}
 
-            <div className="px-6 pt-2 pb-4 flex flex-wrap gap-2 items-center">
+            <div className="post-meta">
                 {post.category_name && (
                     <button 
                         onClick={() => setPage({ name: 'category', categorySlug: post.category_slug })}
-                        className="font-bold text-xs uppercase text-pink-600 bg-pink-100 dark:bg-pink-900/50 px-2 py-1 rounded hover:bg-pink-200 dark:hover:bg-pink-800/50 transition-colors"
+                        className="category-button"
                     >
                         {post.category_name}
                     </button>
@@ -167,65 +212,70 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                 {post.tags && post.tags.map((tag) => (
                      <span
                         key={tag}
-                        className="inline-flex items-center px-4 py-1 rounded-full bg-pink-100 dark:bg-pink-900/30 border border-pink-300 text-pink-700 dark:text-pink-200 text-sm font-bold shadow-md hover:bg-pink-200 transition-colors duration-150 cursor-pointer"
-                        style={{ boxShadow: '0 2px 8px rgba(60,64,67,.10)' }}
+                        className="tag"
                         onClick={() => setPage({ name: 'tag', tagName: tag })}
                     >
-                        <span className="mr-1 text-pink-500 font-bold">#</span>
-                        <span className="font-bold">{tag}</span>
+                        <span className="tag-hash">#</span>
+                        <span>{tag}</span>
                     </span>
                 ))}
             </div>
 
-            <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 gap-4">
-                    <div className="flex items-center">
-                        <UserIcon className="h-5 w-5 text-gray-400"/>
-                        <span className="ml-2">
-                            Posted by <span className="font-medium text-gray-700 dark:text-gray-300">{post.username}</span>
-                        </span>
-                    </div>
+            <div className="post-footer">
+                <div className="post-author">
+                    <UserIcon className="author-icon"/>
+                    <span>
+                        Posted by <span className="author-name">{post.username}</span>
+                    </span>
                     {typeof post.view_count === 'number' && (
-                        <span className="ml-4 text-xs text-gray-400">{post.view_count} views</span>
+                        <span className="view-count">{post.view_count} views</span>
                     )}
                 </div>
 
-                <div className="flex items-center space-x-2">
+                <div className="post-actions">
                     <LikeButton 
                         postId={post.id}
                         initialLikeCount={post.like_count}
                         initialLikedByUser={post.liked_by_user}
                         token={token}
                     />
-                    <button onClick={handleCommentClick} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-green-600 transition-colors" aria-label="Toggle comments">
+                    <button onClick={handleCommentClick} className="action-button comment-button" aria-label="Toggle comments">
                         <MessageCircleIcon />
                     </button>
                     {isAuthor && (
                         <>
-                            <button onClick={() => setPage({ name: 'edit-post', postId: post.id })} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-blue-600 transition-colors" aria-label="Edit post">
+                            <button onClick={() => setPage({ name: 'edit-post', postId: post.id })} className="action-button edit-button" aria-label="Edit post">
                                 <EditIcon />
                             </button>
-                            <button onClick={() => onDelete(post.id)} className="p-2 rounded-md text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-red-600 transition-colors" aria-label="Delete post">
+                            <button onClick={() => onDelete(post.id)} className="action-button delete-button" aria-label="Delete post">
                                 <TrashIcon />
                             </button>
                         </>
                     )}
-                     <button onClick={handleViewPost} className="p-2 rounded-md text-pink-600 bg-pink-100 hover:bg-pink-200 font-bold transition-colors text-xs">
+                     <button onClick={handleViewPost} className="view-button">
                          View
                      </button>
                 </div>
             </div>
 
             {showLoginPrompt && (
-                <div className="px-6 py-3 bg-yellow-100 dark:bg-yellow-900/30 border-t border-yellow-300 dark:border-yellow-700">
-                    <p className="text-yellow-800 dark:text-yellow-200 text-sm">
-                        Please <button onClick={() => setPage({ name: 'login' })} className="font-bold underline hover:text-yellow-900 dark:hover:text-yellow-100">log in</button> to view and post comments.
+                <div className="login-prompt">
+                    <p className="login-text">
+                        Please <button onClick={() => setPage({ name: 'login' })} className="login-link">log in</button> to view and post comments.
                     </p>
                 </div>
             )}
 
             {showComments && token && (
                 <CommentSection postId={post.id} token={token} currentUserId={currentUserId} />
+            )}
+
+            {lightboxOpen && (
+                <Lightbox 
+                    mediaUrl={lightboxMedia.url} 
+                    mediaType={lightboxMedia.type} 
+                    onClose={closeLightbox} 
+                />
             )}
         </article>
     );
