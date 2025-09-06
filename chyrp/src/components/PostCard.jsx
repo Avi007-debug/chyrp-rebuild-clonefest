@@ -5,11 +5,13 @@ import CommentSection from './CommentSection.jsx';
 import LikeButton from './LikeButton.jsx';
 import MarkdownRenderer from './MarkdownRenderer.jsx';
 
-
 const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
     const isAuthor = currentUserId && post.user_id === currentUserId;
     const [showComments, setShowComments] = useState(false);
     const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    const toggleReadMore = () => setIsExpanded(!isExpanded);
 
     const getDomainFromUrl = (url) => {
         try {
@@ -48,7 +50,33 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                         <MediaRenderer post={post} />
                         <div className="p-6">
                             <h2 className="text-xl font-bold cursor-pointer hover:text-pink-600" onClick={handleViewPost}>{post.title}</h2>
-                            {post.content && <div className="prose dark:prose-invert max-w-none mt-2"><MarkdownRenderer content={post.content} /></div>}
+                            {post.content && (
+                                <div className="prose dark:prose-invert max-w-none mt-2">
+                                    {post.content.length > 300 && !isExpanded ? (
+                                        <>
+                                            <MarkdownRenderer content={post.content.slice(0, 300) + "..."} />
+                                            <button
+                                                onClick={toggleReadMore}
+                                                className="text-pink-600 font-bold ml-1 hover:underline"
+                                            >
+                                                Read More
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <MarkdownRenderer content={post.content} />
+                                            {post.content.length > 300 && (
+                                                <button
+                                                    onClick={toggleReadMore}
+                                                    className="text-pink-600 font-bold ml-1 hover:underline"
+                                                >
+                                                    Read Less
+                                                </button>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                 );
@@ -93,7 +121,31 @@ const PostCard = ({ post, currentUserId, setPage, onDelete, token }) => {
                 return (
                     <div className="p-6">
                         <h2 className="text-xl font-bold mb-2 cursor-pointer hover:text-pink-600" onClick={handleViewPost}>{post.title}</h2>
-                        <div className="prose dark:prose-invert max-w-none"><MarkdownRenderer content={post.content} /></div>
+                        <div className="prose dark:prose-invert max-w-none">
+                            {post.content.length > 300 && !isExpanded ? (
+                                <>
+                                    <MarkdownRenderer content={post.content.slice(0, 300) + "..."} />
+                                    <button
+                                        onClick={toggleReadMore}
+                                        className="text-pink-600 font-bold ml-1 hover:underline"
+                                    >
+                                        Read More
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <MarkdownRenderer content={post.content} />
+                                    {post.content.length > 300 && (
+                                        <button
+                                            onClick={toggleReadMore}
+                                            className="text-pink-600 font-bold ml-1 hover:underline"
+                                        >
+                                            Read Less
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </div>
                     </div>
                 );
         }

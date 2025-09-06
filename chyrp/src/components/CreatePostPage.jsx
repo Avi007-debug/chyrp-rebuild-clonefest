@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 const API_URL = "http://localhost:5000";
 
 const CreatePostPage = ({ token, setPage }) => {
-  // --- STATE MANAGEMENT (Merged from both files) ---
+  // --- STATE MANAGEMENT ---
   const [postType, setPostType] = useState('text');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -13,24 +13,17 @@ const CreatePostPage = ({ token, setPage }) => {
   const [licenseText, setLicenseText] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [categories, setCategories] = useState([]);
-
-  // State for Quote and Link post types
   const [quoteText, setQuoteText] = useState('');
   const [quoteAuthor, setQuoteAuthor] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
-
-  // State for Captcha
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaQuestion, setCaptchaQuestion] = useState('');
   const [captchaAnswer, setCaptchaAnswer] = useState('');
-
-  // State for UI feedback
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- EFFECTS ---
-  // Load categories + captcha on initial component mount
   useEffect(() => {
     // Fetch categories
     fetch(`${API_URL}/categories`)
@@ -66,7 +59,6 @@ const CreatePostPage = ({ token, setPage }) => {
 
   const handlePostTypeChange = (newType) => {
     setPostType(newType);
-    // Reset fields that are not shared between post types
     setContent('');
     setMediaFiles([]);
     setQuoteText('');
@@ -80,18 +72,18 @@ const CreatePostPage = ({ token, setPage }) => {
     setError('');
     setSuccess('');
 
-    // Step 0: Validation
+    // Validation
     if ((postType !== 'quote' && !title.trim()) || !categoryId) {
-        setError('Title and Category are required.');
-        return;
+      setError('Title and Category are required.');
+      return;
     }
     if (postType === 'quote' && !quoteText.trim()) {
-        setError('Quote text is required.');
-        return;
+      setError('Quote text is required.');
+      return;
     }
     if (postType === 'link' && !linkUrl.trim()) {
-        setError('URL is required for link posts.');
-        return;
+      setError('URL is required for link posts.');
+      return;
     }
     if (!captchaAnswer.trim()) {
       setError('Please solve the captcha.');
@@ -109,7 +101,7 @@ const CreatePostPage = ({ token, setPage }) => {
       });
       const captchaData = await captchaRes.json();
       if (!captchaData.success) {
-        loadCaptcha(); // Load a new captcha after a failed attempt
+        loadCaptcha();
         throw new Error("Captcha verification failed. Please try again.");
       }
 
@@ -155,7 +147,7 @@ const CreatePostPage = ({ token, setPage }) => {
         postData.content = finalQuote;
       } else if (postType === 'link') {
         postData.link_url = linkUrl.trim();
-        postData.content = content.trim(); // Optional description for a link
+        postData.content = content.trim();
       }
 
       // Step 4: Send the request to create the post
@@ -173,9 +165,7 @@ const CreatePostPage = ({ token, setPage }) => {
         throw new Error(errData.message || 'Failed to create post.');
       }
 
-      // --- Success State ---
       setSuccess('Post created successfully!');
-      // Reset all form fields
       setTitle('');
       setContent('');
       setTags('');
@@ -186,7 +176,7 @@ const CreatePostPage = ({ token, setPage }) => {
       setQuoteAuthor('');
       setLinkUrl('');
       setCaptchaAnswer('');
-      loadCaptcha(); // Load a new captcha for the next post
+      loadCaptcha();
 
       setTimeout(() => setPage({ name: 'home' }), 1500);
 
@@ -242,7 +232,7 @@ const CreatePostPage = ({ token, setPage }) => {
             </div>
           </>
         );
-      default: // 'text' post type
+      default:
         return (
           <div>
             <label htmlFor="content-input" className="block font-semibold mb-2">Content (Markdown supported)</label>
