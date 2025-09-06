@@ -12,11 +12,16 @@ import os
 from werkzeug.utils import secure_filename
 import random
 import string
+from supabase import create_client, Client
 
 
 # --- App Initialization & Config ---
 app = Flask(__name__, static_folder='uploads', static_url_path='/uploads')
-CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
+CORS(app, resources={r"/*": {"origins": [
+    "http://localhost:5173",
+    "https://chyrp-rebuild-clonefest-livid.vercel.app"
+]}})
+
 bcrypt = Bcrypt(app)
 app.config["JWT_SECRET_KEY"] = "your-super-secret-key-for-development"
 jwt = JWTManager(app)
@@ -38,16 +43,12 @@ def invalidate_post_caches(post_id=None):
         # NEW: Invalidate category cache if we have one
         # For now, just invalidating all posts is enough.
 
-# --- AWS S3 Configuration (for Vercel deployment) ---
-S3_BUCKET = os.getenv('S3_BUCKET_NAME')
-S3_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
-S3_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-S3_REGION = os.getenv('AWS_REGION', 'us-east-1')
+# --- Supabase Configuration ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # Service Role Key
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET_NAME", "uploads")
 
-s3_client = None
-if S3_BUCKET and S3_ACCESS_KEY and S3_SECRET_KEY:
-    s3_client = boto3.client('s3', aws_access_key_id=S3_ACCESS_KEY, aws_secret_access_key=S3_SECRET_KEY)
-
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # --- File Upload Configuration ---
@@ -655,12 +656,22 @@ def toggle_like(post_id):
 # --- Media Upload Endpoints ---
 # ====================================================================
 
+from supabase import create_client, Client
+
+# --- Supabase Configuration ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # Service Role Key
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET_NAME", "uploads")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
 @app.route('/upload', methods=['POST'])
 @jwt_required()
 def upload_media():
     """
     Handles uploading of media files.
-    Uploads to Amazon S3 if configured, otherwise falls back to local storage.
+    Uploads to Supabase Storage if configured, otherwise falls back to local storage.
     """
     if 'file' not in request.files:
         return jsonify({"message": "No file part in the request"}), 400
@@ -674,26 +685,28 @@ def upload_media():
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
 
-        # --- S3 Upload Logic (for production on Vercel) ---
-        if s3_client:
+        # --- Supabase Upload Logic ---
+        if supabase:
             try:
-                s3_client.upload_fileobj(
-                    file, S3_BUCKET, unique_filename,
-                    ExtraArgs={"ACL": "public-read", "ContentType": file.content_type}
-                )
-                file_url = f"https://{S3_BUCKET}.s3.amazonaws.com/{unique_filename}"
-                return jsonify({"message": "File uploaded successfully to S3", "file_url": file_url}), 201
-            except Exception as e:
-                print(f"S3 Upload Error: {e}")
-                return jsonify({"message": "Failed to upload to S3"}), 500
+                file_data = file.read()
+                res = supabase.storage.from_(SUPABASE_BUCKET).upload(unique_filename, file_data)
+                if res.get('error'):
+                    raise Exception(res['error'])
 
-        # --- Local Fallback Logic (for development) ---
-        else:
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
-            file_url = f"{request.host_url}uploads/{unique_filename}"
-            return jsonify({"message": "File uploaded locally (S3 not configured)", "file_url": file_url}), 201
+                file_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)['publicUrl']
+                return jsonify({"message": "File uploaded successfully to Supabase", "file_url": file_url}), 201
+            except Exception as e:
+                print(f"Supabase Upload Error: {e}")
+                # Fallback to local storage if Supabase fails
+
+        # --- Local Fallback Logic (for development or fallback) ---
+        file.seek(0)  # Reset file pointer after reading
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
+        file_url = f"{request.host_url}uploads/{unique_filename}"
+        return jsonify({"message": "File uploaded locally (Supabase failed or not configured)", "file_url": file_url}), 201
     else:
         return jsonify({"message": "File type not allowed"}), 400
+
 
 # ====================================================================
 # --- Categories Endpoint ---
