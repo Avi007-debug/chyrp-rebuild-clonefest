@@ -1,6 +1,6 @@
 // src/components/Lightbox.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import './lightbox.css';
+import './Lightbox.css';
 
 const Lightbox = ({ mediaUrl, mediaType, onClose }) => {
     const [zoom, setZoom] = useState(1);
