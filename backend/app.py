@@ -17,10 +17,8 @@ from supabase import create_client, Client
 
 # --- App Initialization & Config ---
 app = Flask(__name__, static_folder='uploads', static_url_path='/uploads')
-CORS(app, resources={r"/*": {"origins": [
-    "http://localhost:5173",
-    "https://chyrp-rebuild-clonefest-livid.vercel.app"
-]}})
+# Even shorter
+CORS(app)
 
 bcrypt = Bcrypt(app)
 app.config["JWT_SECRET_KEY"] = "your-super-secret-key-for-development"
