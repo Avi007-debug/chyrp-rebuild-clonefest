@@ -36,10 +36,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO p1;
 ## 3. Run Schema File
 In pgAdmin’s Query Tool or terminal:
 
-1. Navigate to [`dbsetup.sql`](dbsetup.sql) in your project folder.
-2. Run the file **twice**:
-   - First run removes existing tables (reset).
-   - Second run creates fresh schema and adds sample data.
+1. Navigate to [`dbsetup.sql`](dbsetup.sql) in your project folder.  
+2. Run the file once.  
+   - It will automatically reset existing tables (if any), create the schema, and insert sample data.
 
 ---
 
