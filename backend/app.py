@@ -685,12 +685,16 @@ def toggle_like(post_id):
 # ====================================================================
 # --- Media Upload Endpoints ---
 # ====================================================================
-
 from supabase import create_client, Client
+import os
+import uuid
+from flask import request, jsonify
+from werkzeug.utils import secure_filename
+from flask_jwt_extended import jwt_required
 
 # --- Supabase Configuration ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # Service Role Key
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET_NAME", "uploads")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -704,43 +708,53 @@ def upload_media():
     """
     if 'file' not in request.files:
         return jsonify({"message": "No file part in the request"}), 400
+    
     file = request.files['file']
     if file.filename == '':
         return jsonify({"message": "No file selected for uploading"}), 400
 
     if file and allowed_file(file.filename):
-        import uuid
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
 
         # --- Supabase Upload Logic ---
         if supabase:
             try:
+                # Read file data for Supabase upload
                 file_data = file.read()
-                upload_response = supabase.storage.from_(SUPABASE_BUCKET).upload(unique_filename, file_data)
-
-                # Check for upload error
-                if upload_response.error:
-                    raise Exception(upload_response.error.message)
-
-                # Construct public URL manually
-                file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{unique_filename}"
-                return jsonify({"message": "File uploaded successfully to Supabase", "file_url": file_url}), 201
+                
+                # Upload to Supabase Storage
+                supabase.storage.from_(SUPABASE_BUCKET).upload(
+                    path=unique_filename,
+                    file=file_data,
+                    file_options={"content-type": file.content_type}
+                )
+                
+                # Get the public URL
+                file_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)
+                
+                return jsonify({
+                    "message": "File uploaded successfully to Supabase", 
+                    "file_url": file_url
+                }), 201
 
             except Exception as e:
                 print(f"Supabase Upload Error: {e}")
-                # Will fallback to local storage below
+                # Reset file pointer for local fallback
+                file.seek(0)
 
         # --- Local Fallback Logic ---
-        file.seek(0)  # Reset file pointer
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
+        # If Supabase failed or not configured, save locally
+        local_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(local_path)
         file_url = f"{request.host_url}uploads/{unique_filename}"
-        return jsonify({"message": "File uploaded locally (Supabase failed or not configured)", "file_url": file_url}), 201
-
+        
+        return jsonify({
+            "message": "File uploaded locally (Supabase failed or not configured)", 
+            "file_url": file_url
+        }), 201
     else:
         return jsonify({"message": "File type not allowed"}), 400
-
-
 # ====================================================================
 # --- Categories Endpoint ---
 # ====================================================================
