@@ -38,7 +38,7 @@ This project is deployed using modern cloud tools:
 - **Render** → Backend + Database hosting  
 - **Vercel** → Frontend hosting  
 
-🔗 **Live Demo:** [Chyrp Rebuild (CloneFest 2025)](https://chyrp-rebuild-clonefest-bnqxk0qvw-avishkars-projects-d6956f44.vercel.app/)
+🔗 **Live Demo:** [Chyrp Rebuild (CloneFest 2025)](https://chyrp-rebuild-clonefest-livid.vercel.app/)
 
 ---
 
