@@ -73,10 +73,8 @@ def invalid_token_callback(error):
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"message": "Token has expired"}), 401
 
-import os
-import psycopg2
-
 # --- Database Connection ---
+
 DB_URL = os.getenv("DATABASE_URL")  # Uses env variable if available
 
 def get_db_connection():
