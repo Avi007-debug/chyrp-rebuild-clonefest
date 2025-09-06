@@ -14,6 +14,7 @@ import ProfileDropdown from './components/ProfileDropdown.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { PlusCircleIcon } from './components/Icons.jsx';
 
+
 // --- Helper function to decode JWT token ---
 function parseJwt(token) {
     if (!token) { return null; }
@@ -123,7 +124,7 @@ export default function App() {
       </header>
       
       {renderPage()}
-    </div>
+     </div>
     </HelmetProvider>
   );
 }

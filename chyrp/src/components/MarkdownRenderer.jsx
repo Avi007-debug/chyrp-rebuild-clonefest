@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 /**
  * A component that renders Markdown content with syntax highlighting for code blocks.
@@ -35,7 +37,13 @@ const markdownComponents = {
 };
 
 const MarkdownRenderer = ({ content }) => {
-    return <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
+    return (
+        <ReactMarkdown 
+            components={markdownComponents} 
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+        >{content}</ReactMarkdown>
+    );
 };
 
 export default MarkdownRenderer;
