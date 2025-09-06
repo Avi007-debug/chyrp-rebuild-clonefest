@@ -13,7 +13,7 @@ import CategoryPage from './components/CategoryPage.jsx';
 import ProfileDropdown from './components/ProfileDropdown.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { PlusCircleIcon } from './components/Icons.jsx';
-import EmbedRenderer from "./components/EmbedRenderer";
+
 
 // --- Helper function to decode JWT token ---
 function parseJwt(token) {
@@ -124,12 +124,7 @@ export default function App() {
       </header>
       
       {renderPage()}
-          {/* Easy Embed section */}
-      <div className="p-4">
-        <h2 className="text-lg font-semibold mb-2">Embed Something</h2>
-        <EmbedRenderer />
-      </div>
-    </div>
+     </div>
     </HelmetProvider>
   );
 }

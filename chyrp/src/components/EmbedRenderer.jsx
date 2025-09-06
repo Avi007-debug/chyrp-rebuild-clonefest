@@ -1,49 +1,69 @@
-import React, { useState, useEffect } from "react"; // ✅ Fix
+import React, { useState } from "react";
 
-export default function EmbedRenderer() {
+export default function EmbedRenderer({ onEmbed }) {
   const [url, setUrl] = useState("");
   const [embed, setEmbed] = useState("");
+  const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const fetchEmbed = async () => {
+    setMessage("");
+    if (!url.trim()) {
+      setMessage("❌ Please enter a URL.");
+      return;
+    }
+    setIsLoading(true);
+
     try {
-      // Call noembed API directly from frontend
       const res = await fetch(
         `https://noembed.com/embed?url=${encodeURIComponent(url)}`
       );
       const data = await res.json();
 
       if (data.html) {
-        setEmbed(data.html);
+        if (onEmbed) {
+          onEmbed(data.html);
+          setMessage("✅ Embed code added to your post!");
+          setUrl(""); // Clear input on success
+        } else {
+          // Fallback for standalone usage
+          setEmbed(data.html);
+        }
       } else {
-        setEmbed("<p>❌ Unsupported or invalid URL</p>");
+        const errorMessage = data.error || "Unsupported or invalid URL";
+        setMessage(`❌ ${errorMessage}`);
+        setEmbed("");
       }
     } catch (err) {
       console.error("Embed fetch failed", err);
-      setEmbed("<p>⚠️ Error fetching embed</p>");
+      setMessage("⚠️ Error fetching embed. Check console for details.");
+      setEmbed("");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="p-4 max-w-lg mx-auto">
+    <div className="space-y-2">
       <input
         type="text"
-        className="border rounded p-2 w-full"
+        className="border rounded p-2 w-full bg-white dark:bg-gray-900 dark:border-gray-600"
         placeholder="Paste YouTube/Vimeo/Tweet URL"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
       />
       <button
         onClick={fetchEmbed}
-        className="bg-blue-500 text-white px-4 py-2 rounded mt-2"
+        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors disabled:opacity-50"
+        disabled={isLoading}
       >
-        Embed
+        {isLoading ? "Generating..." : "Generate & Add Embed"}
       </button>
 
-      {embed && (
-        <div
-          className="mt-4"
-          dangerouslySetInnerHTML={{ __html: embed }}
-        />
+      {message && <p className="text-sm pt-2">{message}</p>}
+
+      {embed && !onEmbed && (
+        <div className="mt-4" dangerouslySetInnerHTML={{ __html: embed }} />
       )}
     </div>
   );

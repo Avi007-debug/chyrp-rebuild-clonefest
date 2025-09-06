@@ -10,40 +10,81 @@
   justify-content: center;
   align-items: center;
   z-index: 1000;
-  cursor: pointer;
+  /* The backdrop itself shouldn't be a close trigger when zoomed */
 }
 
 .lightbox-content {
   position: relative;
-  max-width: 90%;
-  max-height: 90%;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden; /* This is important for panning */
 }
 
 .lightbox-content img {
   max-width: 100%;
-  max-height: 90vh;
+  max-height: 100%;
   object-fit: contain;
   box-shadow: 0 0 25px rgba(0, 0, 0, 0.5);
   border-radius: 4px;
+  user-select: none; /* Prevent text selection on image */
+}
+
+.lightbox-content .lightbox-video,
+.lightbox-content .lightbox-audio-container {
+  max-width: 100%;
+  max-height: 100%;
+  outline: none;
 }
 
 .lightbox-close {
   position: absolute;
-  top: -40px;
-  right: 0;
+  top: 15px;
+  right: 15px;
   background: none;
   border: none;
   color: white;
-  font-size: 2.5rem;
+  font-size: 2rem;
+  line-height: 1;
   cursor: pointer;
-  padding: 0;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  z-index: 1001;
+  transition: background-color 0.2s;
 }
 
 .lightbox-close:hover {
-  color: #ccc;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.lightbox-controls {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 20px;
+  padding: 5px;
+  display: flex;
+  gap: 5px;
+  z-index: 1001;
+}
+
+.lightbox-controls button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  font-weight: bold;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.lightbox-controls button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
 }

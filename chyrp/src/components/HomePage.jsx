@@ -1,53 +1,85 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import PostCard from './PostCard.jsx';
 
-const API_URL = "http://localhost:5000/";
+const API_URL = "http://localhost:5000";
 
 const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    
+    // --- State for search and pagination ---
     const [tagQuery, setTagQuery] = useState("");
-    const [filteredPosts, setFilteredPosts] = useState([]);
+    const [debouncedTagQuery, setDebouncedTagQuery] = useState(tagQuery);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [hasMore, setHasMore] = useState(false);
+    const [totalPosts, setTotalPosts] = useState(0);
 
-    // Clear any cached state when mounting HomePage
+    // --- Debounce search input ---
     useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedTagQuery(tagQuery);
+        }, 300); // 300ms delay
+
         return () => {
-            // Cleanup function to run when component unmounts
-            setPosts([]);
-            setFilteredPosts([]);
+            clearTimeout(handler);
         };
-    }, []);
+    }, [tagQuery]);
 
+    // --- Reset posts when search query changes ---
     useEffect(() => {
-        const fetchPosts = () => {
-            fetch(`${API_URL}/posts`)
-                .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch posts'))
-                .then(data => {
-                    setPosts(data);
-                    setLoading(false);
-                })
-                .catch(err => {
+        setPosts([]);
+        setCurrentPage(1);
+    }, [debouncedTagQuery]);
+
+    // --- Data fetching effect for posts ---
+    useEffect(() => {
+        // Don't fetch if we're on page > 1 but there are no more pages
+        if (currentPage > 1 && !hasMore) return;
+
+        setLoading(true);
+        setError(null);
+
+        const controller = new AbortController();
+        const { signal } = controller;
+
+        const url = new URL(`${API_URL}/posts`);
+        url.searchParams.append('page', currentPage);
+        // Use debounced query for fetching
+        if (debouncedTagQuery) {
+            url.searchParams.append('tag', debouncedTagQuery);
+        }
+
+        fetch(url.toString(), { signal })
+            .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch posts'))
+            .then(data => {
+                setPosts(prevPosts => [...prevPosts, ...data.posts]);
+                setHasMore(data.has_more);
+                setTotalPosts(data.total_posts);
+                setLoading(false);
+            })
+            .catch(err => {
+                if (err.name !== 'AbortError') {
                     setError(err.toString());
                     setLoading(false);
-                });
-        };
-        fetchPosts();
-    }, []);
+                }
+            });
 
-    useEffect(() => {
-        if (!tagQuery.trim()) {
-            setFilteredPosts(posts);
-        } else {
-            setFilteredPosts(
-                posts.filter(post =>
-                    post.tags && post.tags.some(tag => 
-                        tag.toLowerCase().includes(tagQuery.toLowerCase())
-                    )
-                )
-            );
-        }
-    }, [tagQuery, posts]);
+        return () => controller.abort();
+    }, [currentPage, debouncedTagQuery]);
+
+    // --- Intersection Observer for infinite scroll ---
+    const observer = useRef();
+    const lastPostElementRef = useCallback(node => {
+        if (loading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                setCurrentPage(prevPage => prevPage + 1);
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [loading, hasMore]);
 
     const handleDeletePost = (postId) => {
         if (window.confirm("Are you sure you want to delete this post?")) {
@@ -70,18 +102,12 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
         }
     };
 
-    if (loading) return <div className="text-center p-8">Loading posts...</div>;
-    if (error) return <div className="text-center p-8 text-red-500">Error: {error}</div>;
-
     return (
         <main className="max-w-3xl mx-auto p-6 space-y-8">
-            {/* Header with search only - Create Post button removed */}
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Recent Posts</h1>
-                {/* Create Post button removed from home page */}
             </div>
 
-            {/* Tag search bar */}
             <div className="mb-6 flex justify-center">
                 <input
                     type="text"
@@ -92,32 +118,44 @@ const HomePage = ({ setPage, currentUserId, token, onPostDeleted }) => {
                 />
             </div>
 
-            {/* Post counter */}
-            {tagQuery && (
+            {debouncedTagQuery && !loading && (
                 <div className="text-center text-gray-500 dark:text-gray-400">
-                    Found {filteredPosts.length} post{filteredPosts.length !== 1 ? 's' : ''} with tag "{tagQuery}"
+                    Found {totalPosts} post{totalPosts !== 1 ? 's' : ''} with tag "{debouncedTagQuery}"
                 </div>
             )}
 
-            {/* Posts list */}
-            {filteredPosts.length === 0 && !loading ? (
-                <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                    {tagQuery ? `No posts found for tag "${tagQuery}"` : 'No posts yet. Be the first to post!'}
-                </div>
-            ) : (
+            {posts.length > 0 && (
                 <div className="space-y-6">
-                    {filteredPosts.map(post => (
-                        <PostCard 
-                            key={post.id} 
-                            post={post} 
-                            currentUserId={currentUserId} 
-                            setPage={setPage}
-                            onDelete={handleDeletePost}
-                            token={token}
-                        />
-                    ))}
+                    {posts.map((post, index) => {
+                        const isLastElement = posts.length === index + 1;
+                        return (
+                            <div ref={isLastElement ? lastPostElementRef : null} key={post.id}>
+                                <PostCard 
+                                    post={post} 
+                                    currentUserId={currentUserId} 
+                                    setPage={setPage}
+                                    onDelete={handleDeletePost}
+                                    token={token}
+                                />
+                            </div>
+                        );
+                    })}
                 </div>
             )}
+
+            {loading && <div className="text-center p-8">Loading posts...</div>}
+            
+            {!loading && posts.length === 0 && (
+                <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    {debouncedTagQuery ? `No posts found for tag "${debouncedTagQuery}"` : 'No posts yet. Be the first to post!'}
+                </div>
+            )}
+
+            {!loading && !hasMore && posts.length > 0 && (
+                <div className="text-center p-8 text-gray-500 dark:text-gray-400">You've reached the end!</div>
+            )}
+
+            {error && <div className="text-center p-8 text-red-500">Error: {error}</div>}
         </main>
     );
 };

@@ -200,25 +200,49 @@ def login():
 # =========================
 
 @app.route('/posts', methods=['GET'])
-@cache.cached(key_prefix='all_posts')
 def get_posts():
     """
-    Fetches all posts.
-    UPDATED: Now includes like count, user like status, and an array of tags.
+    Fetches posts with pagination and optional tag searching.
     """
     user_id = None
     try:
         verify_jwt_in_request(optional=True)
         user_id = get_jwt_identity()
-    except Exception:
+    except Exception: # nosec
         user_id = None
     
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        sql_query = """
+
+        # --- Pagination and Search Query Params ---
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 5, type=int) # Number of posts per page
+        tag_query = request.args.get('tag', None, type=str)
+        offset = (page - 1) * per_page
+
+        # --- Build Query Conditions ---
+        where_clauses = []
+        query_params = []
+
+        if tag_query:
+            # This subquery finds all post_ids that have a matching tag
+            where_clauses.append("p.id IN (SELECT pt.post_id FROM post_tags pt JOIN tags t ON pt.tag_id = t.id WHERE t.name ILIKE %s)")
+            query_params.append(f"%{tag_query}%")
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        # --- Total Count Query ---
+        count_query = f"SELECT COUNT(DISTINCT p.id) FROM posts p {where_sql}"
+        cur.execute(count_query, tuple(query_params))
+        total_posts = cur.fetchone()[0]
+        has_more = (offset + per_page) < total_posts
+
+        # --- Main Posts Query ---
+        final_params = [user_id] + query_params + [per_page, offset]
+
+        sql_query = f"""
             SELECT 
                 p.*, 
                 u.username,
@@ -238,14 +262,22 @@ def get_posts():
             LEFT JOIN tags t ON pt.tag_id = t.id
             LEFT JOIN post_media pm ON p.id = pm.post_id
             LEFT JOIN categories cat ON p.category_id = cat.id
+            {where_sql}
             GROUP BY p.id, u.username, lc.like_count, cat.name, cat.slug
-            ORDER BY p.created_at DESC;
+            ORDER BY p.created_at DESC
+            LIMIT %s OFFSET %s;
         """
         
-        cur.execute(sql_query, (user_id,))
+        cur.execute(sql_query, tuple(final_params))
         posts = [dict(post) for post in cur.fetchall()]
         cur.close()
-        return jsonify(posts)
+        
+        return jsonify({
+            "posts": posts,
+            "has_more": has_more,
+            "page": page,
+            "total_posts": total_posts
+        })
     except (Exception, psycopg2.DatabaseError) as error:
         print(f"DATABASE ERROR fetching posts: {error}")
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
@@ -935,4 +967,3 @@ def verify_captcha():
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-

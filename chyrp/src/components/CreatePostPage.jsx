@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import EmbedRenderer from './EmbedRenderer';
 
 const API_URL = "http://localhost:5000";
 
@@ -64,6 +65,11 @@ const CreatePostPage = ({ token, setPage }) => {
     setQuoteText('');
     setQuoteAuthor('');
     setLinkUrl('');
+  };
+
+  const handleEmbed = (embedHtml) => {
+    // Append the embed HTML to the current content, adding newlines for spacing
+    setContent(currentContent => (currentContent ? currentContent + '\n\n' : '') + embedHtml);
   };
 
   // --- MAIN SUBMISSION LOGIC ---
@@ -238,6 +244,13 @@ const CreatePostPage = ({ token, setPage }) => {
             <label htmlFor="content-input" className="block font-semibold mb-2">Content (Markdown supported)</label>
             <textarea id="content-input" value={content} onChange={e => setContent(e.target.value)} rows="10"
               className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 dark:border-gray-600 font-mono"></textarea>
+            
+            {/* Embed Helper Section */}
+            <div className="mt-6 p-4 border-t border-gray-200 dark:border-gray-700">
+                <h3 className="font-semibold mb-2 text-gray-700 dark:text-gray-300">Easy Embed Helper</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">Paste a URL from YouTube, Twitter, etc. to generate embed code and add it to your post.</p>
+                <EmbedRenderer onEmbed={handleEmbed} />
+            </div>
           </div>
         );
     }
