@@ -122,7 +122,7 @@ def get_db_connection():
             END $$;
         """)
         
-            conn.commit()
+        conn.commit()
     except Exception as e:
         print(f"Error creating tables: {e}")
         if conn:
