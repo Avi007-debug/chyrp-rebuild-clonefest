@@ -1,0 +1,25 @@
+# Backend-specific .gitignore
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtualenvs
+.venv/
+venv/
+
+# Environment / secret files
+.env
+.env.*
+
+# Uploads (user media)
+/uploads/
+
+# Package / lock files not to ignore by default, but pipenv/poetry files
+Pipfile.lock
+
+# Misc
+.python-version
