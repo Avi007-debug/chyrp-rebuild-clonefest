@@ -88,9 +88,10 @@ def get_db_connection():
         print(f"Database connection error: {e}")
         raise
     
-    # Create tables if they don't exist
+    # Create tables if they don't exist (use explicit cursor and close it)
     try:
-        with conn.cursor() as cur:
+        cur = conn.cursor()
+        try:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS posts (
                 id SERIAL PRIMARY KEY,
@@ -109,24 +110,31 @@ def get_db_connection():
                 CONSTRAINT posts_type_check CHECK (type IN ('text', 'photo', 'video', 'audio', 'quote', 'link'))
             )
         """)
-        
-        cur.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name = 'posts' AND column_name = 'link_url'
-                ) THEN
-                    ALTER TABLE posts ADD COLUMN link_url TEXT;
-                END IF;
-            END $$;
-        """)
-        
-        conn.commit()
+
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'posts' AND column_name = 'link_url'
+                    ) THEN
+                        ALTER TABLE posts ADD COLUMN link_url TEXT;
+                    END IF;
+                END $$;
+            """)
+
+            conn.commit()
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
     except Exception as e:
         print(f"Error creating tables: {e}")
-        if conn:
+        try:
             conn.rollback()
+        except Exception:
+            pass
         raise
     
     return conn
@@ -168,6 +176,7 @@ def register():
     username, email, password = data['username'], data['email'], data['password']
     password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -181,7 +190,16 @@ def register():
         print(f"DB Error: {e}")
         return jsonify({"message": "Database error"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return jsonify({"message": "User registered successfully"}), 201
 
 @app.route('/login', methods=['POST'])
@@ -192,6 +210,7 @@ def login():
 
     username, password = data['username'], data['password']
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -205,7 +224,16 @@ def login():
         print(f"DB Error: {e}")
         return jsonify({"message": "Database error"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # =========================
 # === Posts Routes ========
@@ -224,10 +252,10 @@ def get_posts():
         user_id = None
     
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
         # --- Pagination and Search Query Params ---
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 5, type=int) # Number of posts per page
@@ -294,7 +322,16 @@ def get_posts():
         print(f"DATABASE ERROR fetching posts: {error}")
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # --- Single Post Detail Endpoint (with View Count Logic) ---
 @app.route('/posts/<int:post_id>', methods=['GET'])
@@ -314,6 +351,7 @@ def get_post(post_id):
         user_id = None
 
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -389,6 +427,11 @@ def get_post(post_id):
         print("Traceback:", traceback.format_exc())  # Print full traceback
         return jsonify({"message": "Database error", "error": str(error)}), 500
     finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
         if conn:
             try:
                 conn.close()
@@ -418,6 +461,7 @@ def create_post():
         return jsonify({"message": "Content is required for quote type posts"}), 400
     
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -453,8 +497,16 @@ def create_post():
         return jsonify({"message": "Database error"}), 500
 
     finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.route('/posts/<int:post_id>', methods=['PUT'])
@@ -483,6 +535,7 @@ def update_post(post_id):
         return jsonify({"message": "Content is required for quotes"}), 400
 
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -516,7 +569,10 @@ def update_post(post_id):
         manage_tags(cur, post_id, tags_string)
 
         conn.commit()
-        cur.close()
+        try:
+            cur.close()
+        except Exception:
+            pass
         return jsonify({"message": "Post updated successfully"}), 200
 
     except (Exception, psycopg2.DatabaseError) as error:
@@ -524,8 +580,16 @@ def update_post(post_id):
         return jsonify({"message": "Database error"}), 500
 
     finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @app.route('/posts/<int:post_id>', methods=['DELETE'])
 @jwt_required()
@@ -533,6 +597,7 @@ def delete_post(post_id):
     invalidate_post_caches(post_id)
     current_user_id = int(get_jwt_identity())
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -551,8 +616,16 @@ def delete_post(post_id):
         print(f"DB Error on delete: {e}")
         return jsonify({"message": "Database error"}), 500
     finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # --- Tag Filter Endpoint ---
 @app.route('/posts/tag/<tag_name>', methods=['GET'])
@@ -567,6 +640,7 @@ def get_posts_by_tag(tag_name):
         user_id = None
 
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -593,7 +667,16 @@ def get_posts_by_tag(tag_name):
         print(f"DB Error: {e}")
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ================================
 # === Likes & Comments Routes ===
@@ -603,6 +686,7 @@ def get_posts_by_tag(tag_name):
 @cache.cached(timeout=300, key_prefix='post_comments_')  # Cache comments for 5 minutes
 def get_comments(post_id):
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -617,7 +701,16 @@ def get_comments(post_id):
         print(f"DB Error: {e}")
         return jsonify({"message": "Database error"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @app.route('/posts/<int:post_id>/comments', methods=['POST'])
 @jwt_required()
@@ -630,6 +723,7 @@ def add_comment(post_id):
 
     content = data['content']
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -655,7 +749,16 @@ def add_comment(post_id):
         print(f"DB Error: {e}")
         return jsonify({"message": "Database error"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @app.route('/posts/<int:post_id>/like', methods=['POST'])
 @jwt_required()
@@ -663,6 +766,7 @@ def toggle_like(post_id):
     invalidate_post_caches(post_id)  # Invalidate relevant caches
     user_id = int(get_jwt_identity())
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -683,7 +787,16 @@ def toggle_like(post_id):
         print(f"DB Error: {e}")
         return jsonify({"message": "Database error"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ====================================================================
 # --- Media Upload Endpoints ---
@@ -766,6 +879,7 @@ def upload_media():
 def get_categories():
     """Fetches all available categories."""
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -776,7 +890,16 @@ def get_categories():
         print(f"DB Error fetching categories: {e}")
         return jsonify({'message': 'Failed to retrieve categories.'}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ====================================================================
 # --- Category Posts Endpoint ---
@@ -793,10 +916,11 @@ def get_posts_by_category(category_slug):
         user_id = None
 
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         cur.execute("SELECT name FROM categories WHERE slug = %s", (category_slug,))
         category = cur.fetchone()
         if not category:
@@ -829,7 +953,16 @@ def get_posts_by_category(category_slug):
         print(f"DB Error fetching posts by category: {e}")
         return jsonify({'message': 'Failed to retrieve posts.'}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ====================================================================
 # --- Webmention Endpoints ---
@@ -865,14 +998,15 @@ def receive_webmention():
         return jsonify({"message": "Invalid target URL format"}), 400
     
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         cur.execute("SELECT id FROM posts WHERE id = %s", (post_id,))
         post = cur.fetchone()
         if not post: return jsonify({"message": "Target post not found"}), 404
-        
+
         insert_query = """
             INSERT INTO webmentions 
             (post_id, source_url, target_url, mention_type, author_name, author_url, author_photo, content, verified)
@@ -883,39 +1017,58 @@ def receive_webmention():
         cur.execute(insert_query, values)
         webmention_id = cur.fetchone()[0]
         conn.commit()
-        
+
         invalidate_post_caches(post_id)
-        
+
         return jsonify({"message": "Webmention received successfully", "id": webmention_id}), 201
-        
+
     except Exception as e:
         print(f"Error processing webmention: {e}")
         return jsonify({"message": "Error processing webmention"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @app.route('/posts/<int:post_id>/webmentions', methods=['GET'])
 def get_webmentions(post_id):
     """Get all webmentions for a post."""
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         cur.execute("""
             SELECT * FROM webmentions 
             WHERE post_id = %s AND verified = true 
             ORDER BY published_at DESC
         """, (post_id,))
-        
+
         webmentions = [dict(mention) for mention in cur.fetchall()]
         return jsonify(webmentions)
-        
+
     except Exception as e:
         print(f"Error fetching webmentions: {e}")
         return jsonify({"message": "Error fetching webmentions"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ====================================================================
 # --- Sitemap Endpoint ---
@@ -926,6 +1079,7 @@ def sitemap():
     base_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     conn = None
+    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -961,7 +1115,16 @@ def sitemap():
         print(f"Sitemap Generation Error: {e}")
         return jsonify({"message": "Could not generate sitemap"}), 500
     finally:
-        if conn: conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ====================================================================
 # --- Captcha Endpoints ---
