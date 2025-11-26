@@ -5,6 +5,7 @@ from flask_caching import Cache # type: ignore
 from flask_jwt_extended import create_access_token, JWTManager, jwt_required, get_jwt_identity, verify_jwt_in_request
 import boto3
 import psycopg2
+from psycopg2 import pool
 from flask import make_response
 from datetime import datetime
 import psycopg2.extras
@@ -72,72 +73,68 @@ def invalid_token_callback(error):
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"message": "Token has expired"}), 401
 
-# --- Database Connection ---
+# --- Database Connection Pool ---
 
 DB_URL = os.getenv("DATABASE_URL")  # Uses env variable if available
+connection_pool = None
 
-def get_db_connection():
-    """Connect to Supabase PostgreSQL database with SSL"""
+def init_connection_pool():
+    """Initialize connection pool with keepalive settings"""
+    global connection_pool
     if not DB_URL:
         raise Exception("DATABASE_URL environment variable not set. Please configure Supabase connection.")
     
     try:
-        # Connect using Supabase pooler URL with SSL required
-        conn = psycopg2.connect(DB_URL, sslmode='require')
+        # Create connection pool with keepalive to prevent SSL timeouts
+        connection_pool = pool.SimpleConnectionPool(
+            1,  # minconn
+            20,  # maxconn
+            DB_URL,
+            sslmode='require',
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
+        )
+        print("Database connection pool initialized successfully")
+    except Exception as e:
+        print(f"Failed to initialize connection pool: {e}")
+        raise
+
+def get_db_connection():
+    """Get connection from pool with error handling"""
+    global connection_pool
+    
+    # Initialize pool if not already done
+    if connection_pool is None:
+        init_connection_pool()
+    
+    try:
+        conn = connection_pool.getconn()
+        if conn:
+            return conn
+        else:
+            raise Exception("Failed to get connection from pool")
     except Exception as e:
         print(f"Database connection error: {e}")
-        raise
-    
-    # Create tables if they don't exist (use explicit cursor and close it)
-    try:
-        cur = conn.cursor()
+        # Try to reinitialize pool on connection failure
         try:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS posts (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                type VARCHAR(20) NOT NULL,
-                title TEXT,
-                content TEXT,
-                link_url TEXT,
-                attribution TEXT,
-                license TEXT,
-                image_url TEXT,
-                category_id INTEGER,
-                view_count INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                CONSTRAINT posts_type_check CHECK (type IN ('text', 'photo', 'video', 'audio', 'quote', 'link'))
-            )
-        """)
+            init_connection_pool()
+            return connection_pool.getconn()
+        except:
+            raise e
 
-            cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns 
-                        WHERE table_name = 'posts' AND column_name = 'link_url'
-                    ) THEN
-                        ALTER TABLE posts ADD COLUMN link_url TEXT;
-                    END IF;
-                END $$;
-            """)
+def return_db_connection(conn):
+    """Return connection to pool"""
+    global connection_pool
+    if connection_pool and conn:
+        connection_pool.putconn(conn)
 
-            conn.commit()
-        finally:
-            try:
-                cur.close()
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"Error creating tables: {e}")
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        raise
-    
-    return conn
+# Initialize connection pool on startup
+try:
+    init_connection_pool()
+except Exception as e:
+    print(f"Warning: Could not initialize connection pool on startup: {e}")
 
 
 # --- Helper: Manage Tags ---
@@ -197,7 +194,7 @@ def register():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
     return jsonify({"message": "User registered successfully"}), 201
@@ -231,7 +228,7 @@ def login():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -329,7 +326,7 @@ def get_posts():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -434,7 +431,7 @@ def get_post(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception as e:
                 print(f"Error closing connection: {e}")  # Log connection closing errors
 @app.route('/posts', methods=['POST'])
@@ -504,7 +501,7 @@ def create_post():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -587,7 +584,7 @@ def update_post(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -623,7 +620,7 @@ def delete_post(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -674,7 +671,7 @@ def get_posts_by_tag(tag_name):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -708,7 +705,7 @@ def get_comments(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -756,7 +753,7 @@ def add_comment(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -794,7 +791,7 @@ def toggle_like(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -897,7 +894,7 @@ def get_categories():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -960,7 +957,7 @@ def get_posts_by_category(category_slug):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -1033,7 +1030,7 @@ def receive_webmention():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -1066,7 +1063,7 @@ def get_webmentions(post_id):
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -1122,7 +1119,7 @@ def sitemap():
                 pass
         if conn:
             try:
-                conn.close()
+                return_db_connection(conn)
             except Exception:
                 pass
 
@@ -1171,3 +1168,4 @@ def verify_captcha():
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
