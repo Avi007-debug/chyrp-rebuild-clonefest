@@ -77,24 +77,22 @@ def expired_token_callback(jwt_header, jwt_payload):
 DB_URL = os.getenv("DATABASE_URL")  # Uses env variable if available
 
 def get_db_connection():
-    if DB_URL:
-        # Connect using the provided DATABASE_URL
-        conn = psycopg2.connect(DB_URL)
-    else:
-        # Fallback for local development
-        DB_HOST = "localhost"
-        DB_NAME = "blog"
-        DB_USER = "p1"
-        DB_PASS = "root"
-        conn = psycopg2.connect(
-            host=DB_HOST, database=DB_NAME,
-            user=DB_USER, password=DB_PASS
-        )
+    """Connect to Supabase PostgreSQL database with SSL"""
+    if not DB_URL:
+        raise Exception("DATABASE_URL environment variable not set. Please configure Supabase connection.")
+    
+    try:
+        # Connect using Supabase pooler URL with SSL required
+        conn = psycopg2.connect(DB_URL, sslmode='require')
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        raise
     
     # Create tables if they don't exist
-    with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS posts (
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS posts (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 type VARCHAR(20) NOT NULL,
@@ -124,7 +122,12 @@ def get_db_connection():
             END $$;
         """)
         
-        conn.commit()
+            conn.commit()
+    except Exception as e:
+        print(f"Error creating tables: {e}")
+        if conn:
+            conn.rollback()
+        raise
     
     return conn
 

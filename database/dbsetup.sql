@@ -165,34 +165,6 @@ CREATE INDEX IF NOT EXISTS idx_post_media_post_id ON post_media(post_id);
 CREATE INDEX IF NOT EXISTS idx_webmentions_post_id ON webmentions(post_id);
 
 -- -------------------------------------------------------------
--- CHANGE OWNERSHIP TO 'p1'
--- This section reassigns ownership of all created objects.
--- NOTE: This script must be executed by a superuser (e.g., 'postgres')
--- for these final commands to succeed.
--- -------------------------------------------------------------
-DO $$
-DECLARE
-    r RECORD;
-BEGIN
-    -- Change ownership of all tables in the public schema
-    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-        EXECUTE 'ALTER TABLE ' || quote_ident(r.tablename) || ' OWNER TO p1;';
-    END LOOP;
-
-    -- Change ownership of all sequences in the public schema
-    FOR r IN (SELECT sequencename FROM pg_sequences WHERE schemaname = 'public') LOOP
-        EXECUTE 'ALTER SEQUENCE ' || quote_ident(r.sequencename) || ' OWNER TO p1;';
-    END LOOP;
-
-    -- Change ownership of all functions in the public schema
-    FOR r IN (SELECT p.proname, pg_get_function_identity_arguments(p.oid) as args 
-              FROM pg_proc p
-              JOIN pg_namespace n ON p.pronamespace = n.oid
-              WHERE n.nspname = 'public') LOOP
-        EXECUTE 'ALTER FUNCTION ' || quote_ident(r.proname) || '(' || r.args || ') OWNER TO p1;';
-    END LOOP;
-END $$;
-
--- -------------------------------------------------------------
 -- End of Script
+-- Note: Supabase uses default 'postgres' user, no ownership changes needed
 -- -------------------------------------------------------------
